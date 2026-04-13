@@ -9,7 +9,7 @@ let tempDir: string;
 
 vi.mock('../src/config.js', () => ({
   loadConfig: () => ({
-    wirenest: { url: 'http://localhost:5173' },
+    wirenest: { url: 'http://localhost:5180' },
     wiki: { get basePath() { return tempDir; } },
   }),
 }));

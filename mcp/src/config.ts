@@ -41,7 +41,7 @@ export interface Config {
 export function loadConfig(): Config {
   return {
     wirenest: {
-      url: process.env.WIRENEST_URL ?? 'http://localhost:5173',
+      url: process.env.WIRENEST_URL ?? 'http://localhost:5180',
       apiKey: process.env.WIRENEST_API_KEY,
     },
     wiki: {

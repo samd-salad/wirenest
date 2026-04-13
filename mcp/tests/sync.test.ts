@@ -36,7 +36,7 @@ vi.stubGlobal('fetch', async (url: string, opts?: RequestInit) => {
 // Mock config
 vi.mock('../src/config.js', () => ({
   loadConfig: () => ({
-    wirenest: { url: 'http://localhost:5173' },
+    wirenest: { url: 'http://localhost:5180' },
     wiki: { basePath: '/tmp/wiki' },
     pihole: { url: 'http://10.0.10.3', password: 'test-password' },
     pfsense: { url: 'https://10.0.10.1', apiKey: 'key', apiSecret: 'secret' },

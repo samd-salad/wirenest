@@ -6,6 +6,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { loadConfig } from '../config.js';
+import { fetchJson, HttpError, NetworkError, TimeoutError } from '../http.js';
 
 const config = loadConfig();
 
@@ -19,25 +20,21 @@ async function fwFetch(path: string, fw: NonNullable<ReturnType<typeof getFirewa
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
   if (fw.type === 'pfsense') {
-    // pfSense REST API uses client-id + client-token
     headers['Authorization'] = `${fw.apiKey} ${fw.apiSecret}`;
   } else {
-    // OPNsense uses Basic auth with key:secret
     headers['Authorization'] = `Basic ${btoa(`${fw.apiKey}:${fw.apiSecret}`)}`;
   }
 
-  const res = await fetch(`${fw.url}${path}`, {
-    headers,
-    // Allow self-signed certs (homelab)
-    // @ts-ignore - Node.js specific
-    ...(fw.url.startsWith('https') ? { agent: undefined } : {}),
-  });
-
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Firewall API error (${res.status}): ${body.slice(0, 200)}`);
+  try {
+    return await fetchJson(`${fw.url}${path}`, { headers, timeoutMs: 10000 });
+  } catch (err) {
+    if (err instanceof HttpError) {
+      throw new Error(`Firewall API error (${err.status}): ${err.body.slice(0, 200)}`);
+    }
+    if (err instanceof TimeoutError) throw new Error(`Firewall at ${fw.url} did not respond in time`);
+    if (err instanceof NetworkError) throw new Error(`Firewall unreachable at ${fw.url}`);
+    throw err;
   }
-  return res.json();
 }
 
 export function registerPfsenseTools(server: McpServer) {

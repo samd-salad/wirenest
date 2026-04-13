@@ -10,7 +10,7 @@
  *
  * Usage:
  *   npx tsx src/index.ts                     # stdio transport (Claude Code)
- *   WIRENEST_URL=http://localhost:5173 npx tsx src/index.ts
+ *   WIRENEST_URL=http://localhost:5180 npx tsx src/index.ts
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';

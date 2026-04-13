@@ -8,6 +8,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { loadConfig } from '../config.js';
+import { fetchJson, HttpError, NetworkError, TimeoutError } from '../http.js';
 
 const PIHOLE_SOURCE = 'pihole-sync';
 const DHCP_SOURCE = 'dhcp-sync';
@@ -21,20 +22,31 @@ async function wnFetch(path: string, options?: RequestInit) {
   if (cfg.wirenest.apiKey) {
     headers['Authorization'] = `Bearer ${cfg.wirenest.apiKey}`;
   }
-  const res = await fetch(`${cfg.wirenest.url}${path}`, { ...options, headers: { ...headers, ...options?.headers } });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`WireNest API error (${res.status}): ${body}`);
+  try {
+    return await fetchJson(`${cfg.wirenest.url}${path}`, {
+      ...options,
+      headers: { ...headers, ...options?.headers },
+      timeoutMs: 10000,
+    });
+  } catch (err) {
+    if (err instanceof HttpError) {
+      throw new Error(`WireNest API error (${err.status}): ${err.body.slice(0, 500)}`);
+    }
+    if (err instanceof TimeoutError) {
+      throw new Error(`WireNest API timed out — is the Electron app running at ${cfg.wirenest.url}?`);
+    }
+    if (err instanceof NetworkError) {
+      throw new Error(`WireNest API unreachable at ${cfg.wirenest.url} — start the Electron app with 'pnpm dev'`);
+    }
+    throw err;
   }
-  return res.json();
 }
 
 async function piholeUrl(): Promise<string> {
   const cfg = config();
   if (cfg.wirenest.url) {
     try {
-      const res = await fetch(`${cfg.wirenest.url}/api/devices`);
-      const data = await res.json();
+      const data: any = await fetchJson(`${cfg.wirenest.url}/api/devices`, { timeoutMs: 5000 });
       const pihole = data.devices?.find((d: any) =>
         d.name?.toLowerCase().includes('pihole') || d.role?.toLowerCase().includes('pihole')
       );
@@ -48,22 +60,32 @@ async function piholeAuth(baseUrl: string): Promise<string> {
   const cfg = config();
   const password = cfg.pihole?.password ?? '';
   if (!password) throw new Error('Pi-hole password not configured. Set PIHOLE_PASSWORD env var.');
-  const res = await fetch(`${baseUrl}/api/auth`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password }),
-  });
-  if (!res.ok) throw new Error(`Pi-hole auth failed: ${res.status}`);
-  const data = await res.json();
-  return data.session?.sid ?? '';
+  try {
+    const data: any = await fetchJson(`${baseUrl}/api/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+      timeoutMs: 10000,
+    });
+    return data.session?.sid ?? '';
+  } catch (err) {
+    if (err instanceof HttpError) throw new Error(`Pi-hole auth failed: ${err.status}`);
+    if (err instanceof TimeoutError) throw new Error(`Pi-hole at ${baseUrl} did not respond in time`);
+    if (err instanceof NetworkError) throw new Error(`Pi-hole unreachable at ${baseUrl}`);
+    throw err;
+  }
 }
 
 async function piholeFetch(path: string, sid: string, baseUrl: string) {
-  const res = await fetch(`${baseUrl}/api${path}`, {
-    headers: { 'X-FTL-SID': sid },
-  });
-  if (!res.ok) throw new Error(`Pi-hole API error: ${res.status}`);
-  return res.json();
+  try {
+    return await fetchJson(`${baseUrl}/api${path}`, {
+      headers: { 'X-FTL-SID': sid },
+      timeoutMs: 10000,
+    });
+  } catch (err) {
+    if (err instanceof HttpError) throw new Error(`Pi-hole API error: ${err.status}`);
+    throw err;
+  }
 }
 
 function getFirewallConfig() {
@@ -80,12 +102,16 @@ async function fwFetch(path: string, fw: NonNullable<ReturnType<typeof getFirewa
   } else {
     headers['Authorization'] = `Basic ${btoa(`${fw.apiKey}:${fw.apiSecret}`)}`;
   }
-  const res = await fetch(`${fw.url}${path}`, { headers });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Firewall API error (${res.status}): ${body.slice(0, 200)}`);
+  try {
+    return await fetchJson(`${fw.url}${path}`, { headers, timeoutMs: 10000 });
+  } catch (err) {
+    if (err instanceof HttpError) {
+      throw new Error(`Firewall API error (${err.status}): ${err.body.slice(0, 200)}`);
+    }
+    if (err instanceof TimeoutError) throw new Error(`Firewall at ${fw.url} did not respond in time`);
+    if (err instanceof NetworkError) throw new Error(`Firewall unreachable at ${fw.url}`);
+    throw err;
   }
-  return res.json();
 }
 
 /** Get all WireNest devices, indexed by MAC and IP for fast matching. */

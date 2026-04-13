@@ -6,6 +6,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { loadConfig } from '../config.js';
+import { fetchJson, HttpError, NetworkError, TimeoutError } from '../http.js';
 
 const config = loadConfig();
 const BASE = config.wirenest.url;
@@ -15,12 +16,24 @@ async function wnFetch(path: string, options?: RequestInit) {
   if (config.wirenest.apiKey) {
     headers['Authorization'] = `Bearer ${config.wirenest.apiKey}`;
   }
-  const res = await fetch(`${BASE}${path}`, { ...options, headers: { ...headers, ...options?.headers } });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`WireNest API error (${res.status}): ${body}`);
+  try {
+    return await fetchJson(`${BASE}${path}`, {
+      ...options,
+      headers: { ...headers, ...options?.headers },
+      timeoutMs: 10000,
+    });
+  } catch (err) {
+    if (err instanceof HttpError) {
+      throw new Error(`WireNest API error (${err.status}): ${err.body.slice(0, 500)}`);
+    }
+    if (err instanceof TimeoutError) {
+      throw new Error(`WireNest API timed out — is the Electron app running at ${BASE}?`);
+    }
+    if (err instanceof NetworkError) {
+      throw new Error(`WireNest API unreachable at ${BASE} — start the Electron app with 'pnpm dev'`);
+    }
+    throw err;
   }
-  return res.json();
 }
 
 export function registerWireNestTools(server: McpServer) {

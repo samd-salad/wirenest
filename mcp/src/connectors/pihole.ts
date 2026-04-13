@@ -6,6 +6,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { loadConfig } from '../config.js';
+import { fetchJson, fetchWithTimeout, HttpError, NetworkError, TimeoutError } from '../http.js';
 
 const config = loadConfig();
 
@@ -13,8 +14,7 @@ async function piholeUrl(): Promise<string> {
   // Try WireNest first for the URL
   if (config.wirenest.url) {
     try {
-      const res = await fetch(`${config.wirenest.url}/api/devices`);
-      const data = await res.json();
+      const data: any = await fetchJson(`${config.wirenest.url}/api/devices`, { timeoutMs: 5000 });
       const pihole = data.devices?.find((d: any) => d.name?.toLowerCase().includes('pihole') || d.role?.toLowerCase().includes('pihole'));
       if (pihole?.ip) return `http://${pihole.ip}`;
     } catch { /* fall through */ }
@@ -23,26 +23,35 @@ async function piholeUrl(): Promise<string> {
 }
 
 async function piholeAuth(baseUrl: string): Promise<string> {
-  // Authenticate to get session ID
   const password = config.pihole?.password ?? '';
   if (!password) throw new Error('Pi-hole password not configured. Set PIHOLE_PASSWORD env var.');
 
-  const res = await fetch(`${baseUrl}/api/auth`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password }),
-  });
-  if (!res.ok) throw new Error(`Pi-hole auth failed: ${res.status}`);
-  const data = await res.json();
-  return data.session?.sid ?? '';
+  try {
+    const data: any = await fetchJson(`${baseUrl}/api/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+      timeoutMs: 10000,
+    });
+    return data.session?.sid ?? '';
+  } catch (err) {
+    if (err instanceof HttpError) throw new Error(`Pi-hole auth failed: ${err.status}`);
+    if (err instanceof TimeoutError) throw new Error(`Pi-hole at ${baseUrl} did not respond in time`);
+    if (err instanceof NetworkError) throw new Error(`Pi-hole unreachable at ${baseUrl}`);
+    throw err;
+  }
 }
 
 async function piholeFetch(path: string, sid: string, baseUrl: string) {
-  const res = await fetch(`${baseUrl}/api${path}`, {
-    headers: { 'X-FTL-SID': sid },
-  });
-  if (!res.ok) throw new Error(`Pi-hole API error: ${res.status}`);
-  return res.json();
+  try {
+    return await fetchJson(`${baseUrl}/api${path}`, {
+      headers: { 'X-FTL-SID': sid },
+      timeoutMs: 10000,
+    });
+  } catch (err) {
+    if (err instanceof HttpError) throw new Error(`Pi-hole API error: ${err.status}`);
+    throw err;
+  }
 }
 
 export function registerPiholeTools(server: McpServer) {
@@ -114,12 +123,12 @@ export function registerPiholeTools(server: McpServer) {
       try {
         const base = await piholeUrl();
         const sid = await piholeAuth(base);
-        const res = await fetch(`${base}/api/dns/blocking`, {
+        await fetchWithTimeout(`${base}/api/dns/blocking`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-FTL-SID': sid },
           body: JSON.stringify({ blocking: enabled }),
+          timeoutMs: 10000,
         });
-        if (!res.ok) throw new Error(`Failed: ${res.status}`);
         return { content: [{ type: 'text', text: `Pi-hole blocking ${enabled ? 'enabled' : 'disabled'}` }] };
       } catch (e) {
         return { content: [{ type: 'text', text: `Error: ${e}` }], isError: true };
