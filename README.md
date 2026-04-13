@@ -2,17 +2,17 @@
 
 > Your nest, wire by wire.
 
-A homelab IDE and single source of truth for homelab data. Think VS Code for infrastructure — tabbed views for every service (pfSense, Proxmox, Pi-hole, Grafana), device inventory, build tracker, and a knowledge wiki in one desktop app.
+A homelab IDE and single source of truth for homelab data. Think VS Code for infrastructure: tabbed views for every service (pfSense, Proxmox, Pi-hole, Grafana), device inventory, build tracker, and a knowledge wiki in one desktop app.
 
 Every Claude session, automation script, and tool reads from and writes to the same WireNest database via a REST API or MCP server. No more stale YAML files.
 
 ## What it does
 
-- **Unified service access** — Embed pfSense, Proxmox, Pi-hole, Portainer, Grafana, etc. as tabs with process isolation and per-service session partitioning
-- **TOFU cert handling** — Trust self-signed homelab certs on first use, persist fingerprints, detect rotation
-- **Device & build tracking** — SQLite-backed inventory of devices, VLANs, IPs, interfaces, builds, and BOM parts
-- **Wiki** — Markdown knowledge base following the [Karpathy LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) (raw sources → structured pages → index)
-- **MCP server** — 28 tools so Claude Code and other agents can read and write homelab state directly
+- **Unified service access**: embed pfSense, Proxmox, Pi-hole, Portainer, Grafana, etc. as tabs with process isolation and per-service session partitioning
+- **TOFU cert handling**: trust self-signed homelab certs on first use, persist fingerprints, detect rotation
+- **Device & build tracking**: SQLite-backed inventory of devices, VLANs, IPs, interfaces, builds, and BOM parts
+- **Wiki**: Markdown knowledge base following the [Karpathy LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) (raw sources, structured pages, index)
+- **MCP server**: 28 tools so Claude Code and other agents can read and write homelab state directly
 
 ## Architecture
 
@@ -55,7 +55,7 @@ Aruba SNMP┘
 
 ## Status
 
-Phase 2 (Electron migration) complete. Services load in isolated `WebContentsView` instances with TOFU cert trust. Next up: secure credential storage with `safeStorage` (Phase 4).
+Phase 2 (Electron migration) complete. Services load in isolated `WebContentsView` instances with TOFU cert trust. Next up is secure credential storage with `safeStorage` (Phase 4).
 
 See [ROADMAP.md](ROADMAP.md) for what's done and what's next.
 
