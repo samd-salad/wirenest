@@ -1,0 +1,66 @@
+# WireNest — Service Configuration
+# Define tabs, service URLs, and integrations here.
+
+services:
+  - id: proxmox
+    name: Proxmox
+    icon: server
+    url: "https://10.0.30.1:8006"
+    category: infrastructure
+    api:
+      enabled: true
+      base: "https://10.0.30.1:8006/api2/json"
+      auth: token  # Configure in .env
+
+  - id: portainer
+    name: Portainer
+    icon: container
+    url: "https://10.0.30.2:9443"
+    category: infrastructure
+    api:
+      enabled: true
+      base: "https://10.0.30.2:9443/api"
+      auth: jwt
+
+  - id: pihole
+    name: Pi-hole
+    icon: shield
+    url: "http://10.0.10.3/admin"
+    category: network
+    api:
+      enabled: true
+      base: "http://10.0.10.3/api"
+      auth: session
+
+  - id: pfsense
+    name: pfSense
+    icon: firewall
+    url: "https://10.0.10.1"
+    category: network
+
+  - id: uptimekuma
+    name: Uptime Kuma
+    icon: heartbeat
+    url: "http://10.0.30.2:3001"
+    category: monitoring
+
+  - id: grafana
+    name: Grafana
+    icon: chart
+    url: "http://10.0.30.2:3000"
+    category: monitoring
+    api:
+      enabled: true
+      base: "http://10.0.30.2:3000/api"
+      auth: token
+
+categories:
+  - id: infrastructure
+    name: Infrastructure
+    order: 1
+  - id: network
+    name: Network
+    order: 2
+  - id: monitoring
+    name: Monitoring
+    order: 3

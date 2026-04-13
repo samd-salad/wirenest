@@ -1,0 +1,29 @@
+@import 'tailwindcss';
+
+@theme {
+	--color-bg: var(--wn-bg, #080d0b);
+	--color-bg-surface: var(--wn-bg-surface, #0e1612);
+	--color-bg-elevated: var(--wn-bg-elevated, #15211a);
+	--color-border: var(--wn-border, #1e2e24);
+	--color-text: var(--wn-text, #c8dece);
+	--color-text-muted: var(--wn-text-muted, #8aaa92);
+	--color-accent: var(--wn-accent, #4a9e5c);
+	--color-accent-hover: var(--wn-accent-hover, #5fb870);
+	--color-accent-dim: var(--wn-accent-dim, #2d6638);
+	--color-danger: var(--wn-danger, #d45555);
+	--color-success: var(--wn-success, #4a9e5c);
+	--color-warning: var(--wn-warning, #d4a843);
+}
+
+html, body {
+	height: 100%;
+	margin: 0;
+	background: var(--color-bg);
+	color: var(--color-text);
+	font-family: var(--wn-font, Consolas, 'Courier New', monospace);
+	font-size: 14px;
+	line-height: 1.6;
+	letter-spacing: 0.01em;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}

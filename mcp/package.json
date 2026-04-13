@@ -1,0 +1,23 @@
+{
+  "name": "mcp-homelab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server for homelab infrastructure management. Connects to pfSense, OPNsense, Pi-hole, Proxmox, and more. Uses WireNest as single source of truth.",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.4"
+  }
+}

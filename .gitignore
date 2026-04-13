@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+build/
+.svelte-kit/
+out/
+
+# Local data — personal configs, IPs, device info
+# Template files (*.example.yaml) ARE committed; real data is not
+local/
+wirenest.db
+wirenest.db-wal
+wirenest.db-shm
+
+# Environment
+.env
+.env.*
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Editor
+.vscode/
+.claude/
+*.swp
