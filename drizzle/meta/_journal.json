@@ -8,6 +8,27 @@
       "when": 1775630597151,
       "tag": "0000_striped_shen",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1776408187042,
+      "tag": "0001_empty_nitro",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1776460210903,
+      "tag": "0002_aspiring_devos",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1776461670633,
+      "tag": "0003_special_talkback",
+      "breakpoints": true
     }
   ]
 }

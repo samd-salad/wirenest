@@ -5,8 +5,9 @@ import { eq } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
 import {
 	requireString, requireEnum, optionalString, optionalEnum,
-	optionalInt, optionalBoolean, optionalUrl, ValidationError,
+	optionalInt, optionalBoolean, optionalUrl, parseRouteId, ValidationError,
 } from '$lib/server/validate';
+import { logMutation, newRequestId } from '$lib/server/db/changeLog';
 
 const PART_CATEGORIES = [
 	'cpu', 'motherboard', 'ram', 'storage', 'psu', 'case', 'cooler',
@@ -16,8 +17,8 @@ const PART_CATEGORIES = [
 const PART_STATUSES = ['planned', 'ordered', 'shipped', 'delivered', 'installed', 'returned'] as const;
 
 export const POST: RequestHandler = async ({ params, request }) => {
-	const buildId = parseInt(params.id, 10);
-	if (isNaN(buildId)) return json({ error: 'Invalid build id' }, { status: 400 });
+	const buildId = parseRouteId(params.id);
+	if (buildId == null) return json({ error: 'Invalid build id' }, { status: 400 });
 
 	try {
 		const body = await request.json();
@@ -31,7 +32,6 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		const status = optionalEnum(body.status, 'status', [...PART_STATUSES]) ?? 'planned';
 		const salvaged = optionalBoolean(body.salvaged, 'salvaged') ?? false;
 
-		// Accept priceCents directly or price in dollars
 		let priceCents = optionalInt(body.priceCents, 'priceCents', 0);
 		if (priceCents === undefined && body.price != null) {
 			const price = typeof body.price === 'number' ? body.price : parseFloat(body.price);
@@ -44,18 +44,36 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		const buildExists = db.select().from(schema.build).where(eq(schema.build.id, buildId)).get();
 		if (!buildExists) return json({ error: 'Build not found' }, { status: 404 });
 
-		const partRow = db.insert(schema.buildPart).values({
-			buildId,
-			name,
-			category,
-			specs,
-			priceCents,
-			quantity,
-			vendor,
-			url,
-			status,
-			salvaged,
-		}).returning().get();
+		const reason = typeof body.reason === 'string' && body.reason.trim()
+			? body.reason.trim()
+			: 'user edit via UI';
+		const requestId = newRequestId();
+
+		const partRow = db.transaction((tx) => {
+			const row = tx.insert(schema.buildPart).values({
+				buildId,
+				name,
+				category,
+				specs,
+				priceCents,
+				quantity,
+				vendor,
+				url,
+				status,
+				salvaged,
+			}).returning().get();
+			logMutation(tx, {
+				actor: 'user:ui',
+				objectType: 'build_part',
+				objectId: row.id,
+				action: 'create',
+				before: null,
+				after: row,
+				reason,
+				requestId,
+			});
+			return row;
+		});
 
 		return json({ ...partRow, price: partRow.priceCents != null ? partRow.priceCents / 100 : null }, { status: 201 });
 	} catch (err) {

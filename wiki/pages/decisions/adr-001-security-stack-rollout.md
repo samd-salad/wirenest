@@ -1,10 +1,18 @@
 ---
 title: "ADR-001: Security Stack Rollout Order"
+slug: adr-001-security-stack-rollout
 type: decision
-tags: [security, pfsense, snort, pfblockerng, zeek, arpwatch]
-sources: [raw/adr-001-security-stack-rollout.md]
+status: current
 created: 2026-03-20
-updated: 2026-04-12
+updated: 2026-04-17
+last_verified: 2026-04-17
+confidence: high
+sources:
+  - raw/adr-001-security-stack-rollout.md
+related:
+  - pages/runbooks/network-hardening-playbook.md
+  - pages/runbooks/pfsense-firewall-rules.md
+tags: [security, pfsense, snort, pfblockerng, zeek, arpwatch]
 ---
 
 # ADR-001: Security Stack Rollout Order

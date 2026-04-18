@@ -1,6 +1,12 @@
 import { type Session, type WebContentsView } from 'electron';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
+import {
+	writeEncryptedJson,
+	readEncryptedJson,
+	migratePlaintextJsonToEncrypted,
+	type CredentialBackend,
+} from './credentials';
 
 /**
  * Certificate trust manager — Trust-on-First-Use (TOFU) for self-signed certs.
@@ -10,7 +16,9 @@ import path from 'node:path';
  * 2. Checks if the cert fingerprint is in the trusted store
  * 3. If trusted: allows the connection (callback(0))
  * 4. If unknown: rejects and notifies the app chrome to prompt the user
- * 5. Persists trusted fingerprints to disk (JSON file)
+ * 5. Persists trusted fingerprints to disk (encrypted via safeStorage when a
+ *    backend is configured, otherwise plaintext JSON for tests and legacy
+ *    installs — see `configureCertEncryption`).
  *
  * If a service re-keys its certificate, the fingerprint changes and
  * the user is prompted again — detecting both legitimate rotation
@@ -39,6 +47,23 @@ const TRUSTED_CERTS_FILE = 'trusted-certs.json';
 // In-memory store, loaded from disk on startup
 const trustedCerts = new Map<string, TrustedCert>();
 
+/**
+ * Optional safeStorage backend. When set, trusted-certs are encrypted at
+ * rest using the same envelope that protects secrets in the `credential`
+ * table. Tests leave this unset to keep plaintext JSON assertions simple.
+ */
+let encryptionBackend: CredentialBackend | null = null;
+
+/**
+ * Configure encryption for the cert store. Pass the Electron safeStorage
+ * backend (from `./credentials`) to enable encryption at rest. Call this
+ * before `loadTrustedCerts` during main-process bootstrap; the load will
+ * auto-migrate any plaintext file in place.
+ */
+export function configureCertEncryption(backend: CredentialBackend | null): void {
+	encryptionBackend = backend;
+}
+
 // ── Persistence ──────────────────────────────────────────────────────
 
 function getCertsPath(dataDir: string): string {
@@ -49,9 +74,31 @@ export function loadTrustedCerts(dataDir: string): void {
 	const filePath = getCertsPath(dataDir);
 	if (!existsSync(filePath)) return;
 
+	// Zero-byte file — can happen after an interrupted write on older
+	// non-atomic paths. Treat as "no trust data" rather than throwing
+	// on an empty decrypt, which would silently drop every trusted cert
+	// and prompt the user again on next TLS handshake.
 	try {
-		const raw = readFileSync(filePath, 'utf-8');
-		const certs: TrustedCert[] = JSON.parse(raw);
+		if (statSync(filePath).size === 0) {
+			console.warn('[certs] trusted-certs.json is empty — starting fresh');
+			return;
+		}
+	} catch {
+		return;
+	}
+
+	try {
+		let certs: TrustedCert[];
+		if (encryptionBackend) {
+			// Migrate plaintext → encrypted in place on first boot after
+			// Phase 4 ships. Idempotent on subsequent boots.
+			migratePlaintextJsonToEncrypted(filePath, encryptionBackend);
+			const parsed = readEncryptedJson<TrustedCert[]>(filePath, encryptionBackend);
+			certs = Array.isArray(parsed) ? parsed : [];
+		} else {
+			const raw = readFileSync(filePath, 'utf-8');
+			certs = JSON.parse(raw) as TrustedCert[];
+		}
 		trustedCerts.clear();
 		for (const cert of certs) {
 			if (cert.hostname && cert.fingerprint) {
@@ -67,7 +114,11 @@ export function loadTrustedCerts(dataDir: string): void {
 export function saveTrustedCerts(dataDir: string): void {
 	const filePath = getCertsPath(dataDir);
 	const certs = Array.from(trustedCerts.values());
-	writeFileSync(filePath, JSON.stringify(certs, null, 2), 'utf-8');
+	if (encryptionBackend) {
+		writeEncryptedJson(filePath, certs, encryptionBackend);
+	} else {
+		writeFileSync(filePath, JSON.stringify(certs, null, 2), 'utf-8');
+	}
 }
 
 // ── Trust management ─────────────────────────────────────────────────

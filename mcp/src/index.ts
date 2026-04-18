@@ -16,7 +16,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod'; // shipped with MCP SDK
-import { registerWireNestTools } from './connectors/wirenest.js';
+import { registerSotTools } from './connectors/sot.js';
 import { registerPiholeTools } from './connectors/pihole.js';
 import { registerPfsenseTools } from './connectors/pfsense.js';
 import { registerWikiTools } from './connectors/wiki.js';
@@ -27,12 +27,13 @@ const server = new McpServer({
   version: '0.1.0',
 });
 
-// Register tool groups
-registerWireNestTools(server);
-registerPiholeTools(server);
-registerPfsenseTools(server);
+// Register tool groups — sot.* and wiki.* are the SoT surface (13 tools),
+// pihole.* / pfsense.* / sync.* are live-API helpers that sit alongside.
+registerSotTools(server);
 registerWikiTools(server);
 registerSyncTools(server);
+registerPiholeTools(server);
+registerPfsenseTools(server);
 
 // Start
 const transport = new StdioServerTransport();

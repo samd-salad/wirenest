@@ -55,9 +55,13 @@ export function waitForServer(url: string, timeout = 30000): Promise<void> {
  * DEP0190 (passing args array with shell:true).
  * On Unix, we spawn the vite binary directly with no shell.
  */
-export function startSvelteKitDev(port: number, cwd: string): ChildProcess {
+export function startSvelteKitDev(port: number, cwd: string, env: NodeJS.ProcessEnv = {}): ChildProcess {
 	const viteBin = path.join(cwd, 'node_modules', '.bin', 'vite');
 	const args = ['dev', '--port', String(port)];
+
+	// Merge caller-supplied env on top of inherited env. The shared-secret
+	// token for /api/credentials arrives via `env.WIRENEST_LOCAL_TOKEN`.
+	const mergedEnv: NodeJS.ProcessEnv = { ...process.env, ...env };
 
 	let child: ChildProcess;
 	if (process.platform === 'win32') {
@@ -67,11 +71,13 @@ export function startSvelteKitDev(port: number, cwd: string): ChildProcess {
 			cwd,
 			stdio: ['ignore', 'pipe', 'pipe'],
 			shell: true,
+			env: mergedEnv,
 		});
 	} else {
 		child = spawn(viteBin, args, {
 			cwd,
 			stdio: ['ignore', 'pipe', 'pipe'],
+			env: mergedEnv,
 		});
 	}
 

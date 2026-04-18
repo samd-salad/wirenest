@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, uniqueIndex, index, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, blob, uniqueIndex, index, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 // ============================================================
@@ -261,7 +261,14 @@ export const credential = sqliteTable('credential', {
 	name: text('name').notNull(),
 	serviceId: integer('service_id').references(() => service.id),
 	dataSourceId: integer('data_source_id').references(() => dataSource.id),
+	/**
+	 * Stable, human-readable pointer for this credential. Required to be
+	 * unique so `upsertCredential` can rely on `ON CONFLICT DO UPDATE` for
+	 * atomic upserts — the select-then-write pattern is race-prone.
+	 */
 	secretRef: text('secret_ref').notNull(),
+	/** Encrypted secret bytes (Electron safeStorage envelope). */
+	secretBlob: blob('secret_blob', { mode: 'buffer' }),
 	type: text('type', {
 		enum: ['api_token', 'username_password', 'ssh_key', 'certificate', 'community_string']
 	}).notNull(),
@@ -269,7 +276,9 @@ export const credential = sqliteTable('credential', {
 	createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
 	updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
 	notes: text('notes'),
-});
+}, (table) => [
+	uniqueIndex('uq_credential_secret_ref').on(table.secretRef),
+]);
 
 // ============================================================
 // METRICS (lightweight timeseries — not a Prometheus replacement)
@@ -348,4 +357,34 @@ export const entityTag = sqliteTable('entity_tag', {
 }, (table) => [
 	uniqueIndex('uq_entity_tag').on(table.tagId, table.entityType, table.entityId),
 	index('idx_entity_tag_lookup').on(table.entityType, table.entityId),
+]);
+
+// ============================================================
+// CHANGE LOG — append-only audit of every mutation
+// ============================================================
+
+export const changeLog = sqliteTable('change_log', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	ts: text('ts').notNull().default(sql`(datetime('now'))`),
+	// 'user:sam' | 'agent:claude' | 'mcp:proxmox-sync' | 'user:ui'
+	actor: text('actor').notNull(),
+	// 'device', 'vlan', 'ip_address', 'wiki_page', etc.
+	objectType: text('object_type').notNull(),
+	// Stored as TEXT so non-integer IDs (wiki paths, uuids) are supported.
+	objectId: text('object_id').notNull(),
+	action: text('action', { enum: ['create', 'update', 'delete'] }).notNull(),
+	// JSON snapshot of the row BEFORE the mutation (null on create).
+	beforeJson: text('before_json'),
+	// JSON snapshot AFTER the mutation (null on delete).
+	afterJson: text('after_json'),
+	// Groups multi-row mutations that are logically one change
+	// (e.g. "rebalance VLAN 20" touches 8 rows → one request_id).
+	requestId: text('request_id'),
+	// Short "why" text — required for agent writes via MCP, defaulted
+	// for UI/REST writes.
+	reason: text('reason'),
+}, (table) => [
+	index('idx_change_log_ts').on(table.ts),
+	index('idx_change_log_object').on(table.objectType, table.objectId),
+	index('idx_change_log_request').on(table.requestId),
 ]);

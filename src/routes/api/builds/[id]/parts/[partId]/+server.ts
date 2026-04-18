@@ -5,8 +5,9 @@ import { eq, and } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
 import {
 	optionalString, optionalEnum, optionalInt, optionalBoolean,
-	optionalUrl, ValidationError,
+	optionalUrl, parseRouteId, ValidationError,
 } from '$lib/server/validate';
+import { logMutation, newRequestId } from '$lib/server/db/changeLog';
 
 const PART_CATEGORIES = [
 	'cpu', 'motherboard', 'ram', 'storage', 'psu', 'case', 'cooler',
@@ -16,9 +17,9 @@ const PART_CATEGORIES = [
 const PART_STATUSES = ['planned', 'ordered', 'shipped', 'delivered', 'installed', 'returned'] as const;
 
 export const PUT: RequestHandler = async ({ params, request }) => {
-	const buildId = parseInt(params.id, 10);
-	const partId = parseInt(params.partId, 10);
-	if (isNaN(buildId) || isNaN(partId)) return json({ error: 'Invalid id' }, { status: 400 });
+	const buildId = parseRouteId(params.id);
+	const partId = parseRouteId(params.partId);
+	if (buildId == null || partId == null) return json({ error: 'Invalid id' }, { status: 400 });
 
 	try {
 		const body = await request.json();
@@ -39,7 +40,6 @@ export const PUT: RequestHandler = async ({ params, request }) => {
 		if ('orderedAt' in body) updateData.orderedAt = optionalString(body.orderedAt, 'orderedAt', 50);
 		if ('deliveredAt' in body) updateData.deliveredAt = optionalString(body.deliveredAt, 'deliveredAt', 50);
 
-		// Handle price — accept either priceCents or price (dollars)
 		if ('priceCents' in body) {
 			updateData.priceCents = optionalInt(body.priceCents, 'priceCents', 0);
 		} else if ('price' in body) {
@@ -54,9 +54,27 @@ export const PUT: RequestHandler = async ({ params, request }) => {
 			}
 		}
 
-		db.update(schema.buildPart).set(updateData).where(eq(schema.buildPart.id, partId)).run();
+		const reason = typeof body.reason === 'string' && body.reason.trim()
+			? body.reason.trim()
+			: 'user edit via UI';
+		const requestId = newRequestId();
 
-		const updated = db.select().from(schema.buildPart).where(eq(schema.buildPart.id, partId)).get();
+		const updated = db.transaction((tx) => {
+			tx.update(schema.buildPart).set(updateData).where(eq(schema.buildPart.id, partId)).run();
+			const after = tx.select().from(schema.buildPart).where(eq(schema.buildPart.id, partId)).get();
+			logMutation(tx, {
+				actor: 'user:ui',
+				objectType: 'build_part',
+				objectId: partId,
+				action: 'update',
+				before: existing,
+				after,
+				reason,
+				requestId,
+			});
+			return after;
+		});
+
 		return json({ ...updated, price: updated?.priceCents != null ? updated.priceCents / 100 : null });
 	} catch (err) {
 		if (err instanceof ValidationError) {
@@ -67,17 +85,39 @@ export const PUT: RequestHandler = async ({ params, request }) => {
 	}
 };
 
-export const DELETE: RequestHandler = async ({ params }) => {
-	const buildId = parseInt(params.id, 10);
-	const partId = parseInt(params.partId, 10);
-	if (isNaN(buildId) || isNaN(partId)) return json({ error: 'Invalid id' }, { status: 400 });
+export const DELETE: RequestHandler = async ({ params, request }) => {
+	const buildId = parseRouteId(params.id);
+	const partId = parseRouteId(params.partId);
+	if (buildId == null || partId == null) return json({ error: 'Invalid id' }, { status: 400 });
 
 	try {
 		const existing = db.select().from(schema.buildPart)
 			.where(and(eq(schema.buildPart.id, partId), eq(schema.buildPart.buildId, buildId))).get();
 		if (!existing) return json({ error: 'Part not found' }, { status: 404 });
 
-		db.delete(schema.buildPart).where(eq(schema.buildPart.id, partId)).run();
+		let reason = 'user delete via UI';
+		try {
+			const body = await request.json();
+			if (typeof body?.reason === 'string' && body.reason.trim()) reason = body.reason.trim();
+		} catch {
+			// DELETE bodies are optional — fall through to default reason.
+		}
+		const requestId = newRequestId();
+
+		db.transaction((tx) => {
+			tx.delete(schema.buildPart).where(eq(schema.buildPart.id, partId)).run();
+			logMutation(tx, {
+				actor: 'user:ui',
+				objectType: 'build_part',
+				objectId: partId,
+				action: 'delete',
+				before: existing,
+				after: null,
+				reason,
+				requestId,
+			});
+		});
+
 		return json({ ok: true });
 	} catch (err) {
 		console.error('Failed to delete part:', err);

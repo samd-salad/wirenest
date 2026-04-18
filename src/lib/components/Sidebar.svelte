@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { sidebarView } from '$lib/stores/sidebar';
 	import { panels } from '$lib/stores/tabs';
 	import { services, SERVICE_CATALOG, SERVICE_COLORS, type CatalogEntry } from '$lib/stores/services';
 	import { getIcon, iconNames } from './icons';
@@ -302,6 +301,48 @@
 		if (typeof localStorage !== 'undefined') localStorage.setItem('wirenest-cat-collapsed', JSON.stringify([...s]));
 	}
 
+	// Wiki: everything collapsed by default. We track which sections the user
+	// has opted INTO expanding so that type-groups appearing for the first
+	// time land collapsed (matching Obsidian / tree-view conventions).
+	let wikiCollapsed = $state<boolean>(loadWikiCollapsed());
+	let expandedWikiTypes = $state<Set<string>>(loadExpandedWikiTypes());
+
+	function loadWikiCollapsed(): boolean {
+		if (typeof localStorage === 'undefined') return true;
+		const stored = localStorage.getItem('wirenest-wiki-root-collapsed');
+		return stored === null ? true : stored === 'true';
+	}
+
+	function saveWikiCollapsed(v: boolean) {
+		if (typeof localStorage !== 'undefined') localStorage.setItem('wirenest-wiki-root-collapsed', String(v));
+	}
+
+	function toggleWikiRoot() {
+		wikiCollapsed = !wikiCollapsed;
+		saveWikiCollapsed(wikiCollapsed);
+	}
+
+	function loadExpandedWikiTypes(): Set<string> {
+		if (typeof localStorage === 'undefined') return new Set();
+		try {
+			const stored = JSON.parse(localStorage.getItem('wirenest-wiki-expanded') ?? '[]');
+			return new Set(stored);
+		} catch {}
+		return new Set();
+	}
+
+	function saveExpandedWikiTypes(s: Set<string>) {
+		if (typeof localStorage !== 'undefined') localStorage.setItem('wirenest-wiki-expanded', JSON.stringify([...s]));
+	}
+
+	function toggleWikiType(type: string) {
+		const next = new Set(expandedWikiTypes);
+		if (next.has(type)) next.delete(type);
+		else next.add(type);
+		expandedWikiTypes = next;
+		saveExpandedWikiTypes(next);
+	}
+
 	function toggleCategory(catId: string) {
 		const next = new Set(collapsedCategories);
 		if (next.has(catId)) next.delete(catId); else next.add(catId);
@@ -494,11 +535,9 @@
 		panels.openTab({ type: 'docs', title, icon: 'wiki', docPath: path });
 	}
 
-	// Load wiki when docs view is selected
+	// Unified sidebar: wiki is always visible, load on mount.
 	$effect(() => {
-		if ($sidebarView === 'docs') {
-			loadWiki();
-		}
+		loadWiki();
 		return () => wikiController?.abort();
 	});
 
@@ -525,22 +564,90 @@
 </script>
 
 <div class="sidebar-inner">
-	<div class="view-switcher">
-		<button class:active={$sidebarView === 'services'} onclick={() => sidebarView.set('services')} title="Services">
-			<svg viewBox="0 0 24 24" width="18" height="18">{@html getIcon('server')}</svg>
-		</button>
-		<button class:active={$sidebarView === 'docs'} onclick={() => sidebarView.set('docs')} title="Docs">
-			<svg viewBox="0 0 24 24" width="18" height="18">{@html getIcon('wiki')}</svg>
-		</button>
-		<button class:active={$sidebarView === 'bookmarks'} onclick={() => sidebarView.set('bookmarks')} title="Bookmarks">
-			<svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor">
-				<path d="M4 1h8a1 1 0 011 1v13l-5-3-5 3V2a1 1 0 011-1z"/>
-			</svg>
-		</button>
+	<!-- Wiki (typed pages, grouped by type, collapsible) -->
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="category-header wiki-root-header" onclick={toggleWikiRoot}>
+		<span class="cat-chevron">{wikiCollapsed ? '\u25B6' : '\u25BC'}</span>
+		<span class="cat-name">Wiki</span>
+		<span class="cat-count">{wikiPages.length}</span>
 	</div>
+	{#if !wikiCollapsed}
+		{#if wikiLoading}
+			<p class="placeholder">Loading wiki...</p>
+		{:else if wikiError}
+			<p class="placeholder">{wikiError}</p>
+		{:else if wikiPages.length > 0}
+			{@const TYPE_ORDER = [
+				'device', 'vlan', 'service',
+				'runbook', 'decision', 'postmortem',
+				'concept', 'reference',
+				'guide', 'entity', 'troubleshooting', 'comparison', 'source-summary',
+			]}
+			{@const TYPE_LABELS: Record<string, string> = {
+				device: 'Devices', vlan: 'VLANs', service: 'Services (wiki)',
+				runbook: 'Runbooks', decision: 'Decisions', postmortem: 'Postmortems',
+				concept: 'Concepts', reference: 'Reference',
+				guide: 'Guides', entity: 'Entities', troubleshooting: 'Troubleshooting',
+				comparison: 'Comparisons', 'source-summary': 'Source Summaries',
+			}}
+			{@const knownTypes = new Set(TYPE_ORDER)}
+			{@const grouped = TYPE_ORDER
+				.map((t) => ({
+					type: t,
+					label: TYPE_LABELS[t] ?? t,
+					pages: wikiPages.filter((p) => (p.type || 'page') === t),
+				}))
+				.filter((g) => g.pages.length > 0)}
+			{@const otherPages = wikiPages.filter((p) => !knownTypes.has(p.type || 'page'))}
+			{#each grouped as group}
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div class="category-header wiki-type-header" onclick={() => toggleWikiType(group.type)}>
+					<span class="cat-chevron">{expandedWikiTypes.has(group.type) ? '\u25BC' : '\u25B6'}</span>
+					<span class="cat-name">{group.label}</span>
+					<span class="cat-count">{group.pages.length}</span>
+				</div>
+				{#if expandedWikiTypes.has(group.type)}
+					{#each group.pages as page}
+						<button class="service-item wiki-page-item" onclick={() => openWikiPage(page.path, page.title)}>
+							<span class="service-icon">
+								<svg viewBox="0 0 24 24" width="16" height="16">{@html getIcon('wiki')}</svg>
+							</span>
+							<span class="service-name">{page.title}</span>
+						</button>
+					{/each}
+				{/if}
+			{/each}
+			{#if otherPages.length > 0}
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div class="category-header wiki-type-header" onclick={() => toggleWikiType('_other')}>
+					<span class="cat-chevron">{expandedWikiTypes.has('_other') ? '\u25BC' : '\u25B6'}</span>
+					<span class="cat-name">Other</span>
+					<span class="cat-count">{otherPages.length}</span>
+				</div>
+				{#if expandedWikiTypes.has('_other')}
+					{#each otherPages as page}
+						<button class="service-item wiki-page-item" onclick={() => openWikiPage(page.path, page.title)}>
+							<span class="service-icon">
+								<svg viewBox="0 0 24 24" width="16" height="16">{@html getIcon('wiki')}</svg>
+							</span>
+							<span class="service-name">{page.title}</span>
+						</button>
+					{/each}
+				{/if}
+			{/if}
+		{:else}
+			<div class="empty-hint">
+				No pages yet.<br/>
+				Drop a source into <code>wiki/raw/</code> and ingest to get started.
+			</div>
+		{/if}
+	{/if}
 
-	{#if $sidebarView === 'services'}
-		{#if $services.length > 0}
+	<div class="sidebar-divider"></div>
+
+	<!-- Services (external tool tabs) -->
+	<div class="category-label">Services</div>
+	{#if $services.length > 0}
 			{#each servicesByCategory as category, catIdx (category.id)}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div
@@ -850,60 +957,16 @@
 		{/each}
 		{/if}
 
-	{:else if $sidebarView === 'docs'}
-		<div class="section-title">Wiki</div>
-		{#if wikiLoading}
-			<p class="placeholder">Loading wiki...</p>
-		{:else if wikiError}
-			<p class="placeholder">{wikiError}</p>
-		{:else}
-			{#if wikiPages.length > 0}
-				{@const typeOrder = ['entity', 'concept', 'guide', 'runbook', 'decision', 'troubleshooting', 'comparison', 'source-summary', 'page']}
-				{@const groupedPages = typeOrder.map(t => ({
-					type: t,
-					label: t === 'source-summary' ? 'Source Summaries' : t.charAt(0).toUpperCase() + t.slice(1) + 's',
-					pages: wikiPages.filter(p => (p.type || 'page') === t)
-				})).filter(g => g.pages.length > 0)}
-				{#each groupedPages as group}
-					<div class="category-label">{group.label}</div>
-					{#each group.pages as page}
-						<button class="service-item" onclick={() => openWikiPage(page.path, page.title)}>
-							<span class="service-icon">
-								<svg viewBox="0 0 24 24" width="16" height="16">{@html getIcon('wiki')}</svg>
-							</span>
-							<span class="service-name">{page.title}</span>
-						</button>
-					{/each}
-				{/each}
-			{:else}
-				<div class="empty-hint">
-					No pages yet.<br/>
-					Drop a source into <code>wiki/raw/</code> and ingest to get started.
-				</div>
-			{/if}
-
-			<div class="sidebar-divider"></div>
-			<p class="wiki-schema-hint" title="Pages follow the Karpathy LLM Wiki pattern. See wiki/schema.md for conventions.">
-				Schema: entity, concept, source-summary, comparison, guide
-			</p>
-		{/if}
-
-	{:else if $sidebarView === 'bookmarks'}
-		<div class="section-title">Bookmarks</div>
-		<p class="placeholder">Pinned pages — Phase 1</p>
-	{/if}
 </div>
 
 <style>
 	.sidebar-inner { display: flex; flex-direction: column; height: 100%; padding: 0.5rem; overflow-y: auto; }
 
-	.view-switcher { display: flex; gap: 0.25rem; padding: 0.25rem; margin-bottom: 0.75rem; border-bottom: 1px solid var(--color-border); flex-shrink: 0; }
-	.view-switcher button { flex: 1; padding: 0.5rem; background: none; border: none; border-radius: 4px; color: var(--color-text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; }
-	.view-switcher button:hover { background: var(--color-bg-elevated); color: var(--color-text); }
-	.view-switcher button.active { background: var(--color-bg-elevated); color: var(--color-accent); }
-
 	.section-title { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-text-muted); padding: 0.25rem 0.5rem; }
 	.category-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); padding: 0.5rem 0.5rem 0.15rem; opacity: 0.6; }
+	.category-label.wiki-subsection { padding-left: 1rem; opacity: 0.5; }
+	.wiki-type-header { padding-left: 1.25rem; }
+	.wiki-page-item { padding-left: 2.25rem; }
 
 	.category-header {
 		display: flex; align-items: center; gap: 0.35rem;

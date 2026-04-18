@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -17,6 +17,7 @@ import {
 	getTrustedCertCount,
 	clearTrustedCerts,
 	setupCertVerification,
+	configureCertEncryption,
 	type TrustedCert,
 } from '../certificates';
 
@@ -398,6 +399,68 @@ describe('certificates — trust manager', () => {
 			// Only the first entry has both hostname and fingerprint
 			expect(getTrustedCertCount()).toBe(1);
 			expect(getTrustedCert('10.0.10.1')).toBeDefined();
+		});
+	});
+
+	describe('encrypted persistence (Phase 4)', () => {
+		function fakeBackend() {
+			const KEY = 0x3c;
+			return {
+				isAvailable: () => true,
+				encrypt: (plain: string) => {
+					const src = Buffer.from(plain, 'utf-8');
+					const out = Buffer.alloc(src.length);
+					for (let i = 0; i < src.length; i++) out[i] = src[i] ^ KEY;
+					return out;
+				},
+				decrypt: (blob: Buffer) => {
+					const out = Buffer.alloc(blob.length);
+					for (let i = 0; i < blob.length; i++) out[i] = blob[i] ^ KEY;
+					return out.toString('utf-8');
+				},
+			};
+		}
+
+		afterEach(() => {
+			configureCertEncryption(null);
+		});
+
+		it('writes an encrypted blob when a backend is configured', () => {
+			configureCertEncryption(fakeBackend());
+			trustCertificate(tmpDir, '10.0.20.1', PFSENSE_FINGERPRINT, 'pfSense', 'pfSense', 1700000000);
+
+			const raw = readFileSync(path.join(tmpDir, 'trusted-certs.json'), 'utf-8');
+			// Plaintext JSON must not leak the hostname
+			expect(raw).not.toContain('10.0.20.1');
+			expect(raw).not.toContain('pfSense');
+			// And plain JSON.parse should fail on the bytes
+			expect(() => JSON.parse(raw)).toThrow();
+		});
+
+		it('round-trips through encrypted persistence', () => {
+			configureCertEncryption(fakeBackend());
+			trustCertificate(tmpDir, '10.0.20.1', PFSENSE_FINGERPRINT, 'pfSense', 'pfSense', 1700000000);
+
+			clearTrustedCerts();
+			loadTrustedCerts(tmpDir);
+			expect(isTrusted('10.0.20.1', PFSENSE_FINGERPRINT)).toBe(true);
+		});
+
+		it('auto-migrates an existing plaintext file on first load', () => {
+			// Seed a plaintext trusted-certs.json the way older installs have it
+			const plaintext: TrustedCert[] = [
+				{ hostname: '10.0.30.1', fingerprint: PROXMOX_FINGERPRINT, issuer: 'Proxmox', subject: 'Proxmox', validExpiry: 1_800_000_000, trustedAt: '2026-04-10T00:00:00Z' },
+			];
+			writeFileSync(path.join(tmpDir, 'trusted-certs.json'), JSON.stringify(plaintext));
+
+			configureCertEncryption(fakeBackend());
+			loadTrustedCerts(tmpDir);
+
+			expect(isTrusted('10.0.30.1', PROXMOX_FINGERPRINT)).toBe(true);
+
+			// After migration, the file should no longer be plaintext JSON
+			const rawAfter = readFileSync(path.join(tmpDir, 'trusted-certs.json'), 'utf-8');
+			expect(() => JSON.parse(rawAfter)).toThrow();
 		});
 	});
 });

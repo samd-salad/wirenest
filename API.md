@@ -8,14 +8,15 @@ so the same API serves the UI, the MCP server, and external scripts.
 ## How to access
 
 **For LLM agents (Claude Code, etc.):** Use the MCP server (`mcp/`). It wraps
-this API into MCP tools (`wirenest_list_devices`, `wirenest_get_vlan`, etc.) and also
-provides live access to Pi-hole and pfSense. See `mcp/README.md` for setup.
+this API into MCP tools (`sot.list`, `sot.get`, `wiki.read`, etc.) and also
+provides live access to Pi-hole and pfSense. See `mcp/README.md` for the full
+tool list.
 
 **For scripts, curl, or direct access:** Use the REST API below.
 
 ## Base URL
 
-- **Local dev:** `http://localhost:5173/api` (requires `pnpm dev` running in `wirenest/`)
+- **Local dev:** `http://localhost:5180/api` (requires `pnpm dev` running in `wirenest/`)
 
 ## Design Principles
 
@@ -26,14 +27,14 @@ provides live access to Pi-hole and pfSense. See `mcp/README.md` for setup.
 
 ## Authentication
 
-- **Local dev:** None (localhost only, no auth required)
-- This is a single-user desktop app. Auth is not needed for the local API during development.
+- **Most endpoints:** None (localhost only, single-user desktop app).
+- **`/api/credentials`:** Requires a per-boot shared-secret token supplied as the `x-wirenest-local-token` HTTP header. The Electron main process generates the token on launch and exports it to the spawned SvelteKit server's environment (`WIRENEST_LOCAL_TOKEN`). Other local processes cannot reach the credential endpoints without reading that env var. The `credentialBroker` in `electron/` injects the header transparently.
 
 ## Endpoints
 
 > **Note:** This table is a snapshot. If an endpoint is missing or a response
 > shape has changed, check the actual route files in `src/routes/api/` or the
-> MCP tool definitions in `mcp/src/connectors/wirenest.ts`.
+> MCP tool definitions in `mcp/src/connectors/sot.ts` and `wiki.ts`.
 
 ### Devices
 
@@ -71,8 +72,29 @@ provides live access to Pi-hole and pfSense. See `mcp/README.md` for setup.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/wiki` | List wiki pages with titles |
-| `GET` | `/api/wiki/{path}` | Get wiki page content (markdown) |
+| `GET` | `/api/wiki` | List wiki pages (walks subdirs; title + type from frontmatter) |
+| `GET` | `/api/wiki/{path}` | Get a wiki page — returns `{ content, rendered, frontmatter, warnings, compileWarnings }` by default; append `?raw=true` for raw markdown only |
+| `PUT` | `/api/wiki/{path}` | Update a page's content or rename it |
+
+### Dependents + Change Log
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/entity/{type}/{id}/dependents?depth=1` | FK walk — "what references this object?" (depth 1 or 2). Supported types: `device`, `vlan`, `build`, `interface`. |
+| `GET` | `/api/change-log?since=&object_type=&object_id=&actor=&object_types=&request_id=&limit=` | Append-only audit log query. Returns entries with before/after parsed as JSON. |
+
+### Credentials (Phase 4, token-gated)
+
+All credential endpoints require the `x-wirenest-local-token` header (see **Authentication** above). The blob is an `safeStorage.encryptString` output base64-encoded — encryption happens in the Electron main process, never in the renderer and never at this REST layer.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/credentials` | Upsert — body `{ meta: { name, type, serviceId?, dataSourceId?, username?, notes?, secretRef? }, blobBase64, reason? }`. Atomic at SQL layer via `ON CONFLICT(secret_ref)`. Returns stored metadata (never the blob). |
+| `GET` | `/api/credentials?mode=list` | List all credentials — metadata only, `hasSecret: boolean`, no blob. |
+| `GET` | `/api/credentials?mode=has&secretRef=...` | Returns `{ has: boolean }`. |
+| `GET` | `/api/credentials?secretRef=...` | Single credential metadata. |
+| `GET` | `/api/credentials?mode=blob&secretRef=...` | Encrypted blob as base64. Main process decrypts via `safeStorage` in `useCredential(callback)`. |
+| `DELETE` | `/api/credentials?secretRef=...` | Delete. Logs to `change_log` with projected metadata (never the blob). |
 
 ### Admin
 
@@ -112,18 +134,18 @@ Every record includes:
 ### curl
 ```bash
 # List all devices
-curl http://localhost:5173/api/devices
+curl http://localhost:5180/api/devices
 
 # Get a specific device
-curl http://localhost:5173/api/entity/device/7
+curl http://localhost:5180/api/entity/device/7
 
 # Update a VLAN's purpose
-curl -X PUT http://localhost:5173/api/network/vlans/30 \
+curl -X PUT http://localhost:5180/api/network/vlans/30 \
   -H 'Content-Type: application/json' \
   -d '{"purpose": "Proxmox cluster, Docker, monitoring"}'
 
 # Add a part to a build
-curl -X POST http://localhost:5173/api/builds/1/parts \
+curl -X POST http://localhost:5180/api/builds/1/parts \
   -H 'Content-Type: application/json' \
   -d '{"name": "NVMe upgrade", "category": "storage", "specs": "2TB Samsung 990 Pro", "price": 150, "status": "planned"}'
 ```
@@ -132,7 +154,7 @@ curl -X POST http://localhost:5173/api/builds/1/parts \
 ```python
 import requests
 
-BASE = "http://localhost:5173/api"
+BASE = "http://localhost:5180/api"
 
 # Get all devices
 devices = requests.get(f"{BASE}/devices").json()["devices"]

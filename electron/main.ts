@@ -1,5 +1,6 @@
 import { app, BaseWindow, WebContentsView, ipcMain, globalShortcut } from 'electron';
 import { type ChildProcess } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { waitForServer, startSvelteKitDev, killDevServer } from './server';
 import {
@@ -20,7 +21,16 @@ import {
 	removeTrustedCertificate,
 	getTrustedCert,
 	listTrustedCerts,
+	configureCertEncryption,
 } from './certificates';
+import { electronCredentialBackend } from './credentials';
+import {
+	saveCredential,
+	hasCredential,
+	deleteCredential,
+	listCredentials,
+	type CredentialMetaInput,
+} from './credentialBroker';
 import { assertServiceId, assertUrl, assertBounds, assertHostname, assertFingerprint } from './validation';
 
 const SVELTEKIT_PORT = 5180;
@@ -30,6 +40,17 @@ const isDev = !app.isPackaged;
 let mainWindow: BaseWindow | null = null;
 let appView: WebContentsView | null = null;
 let devServer: ChildProcess | null = null;
+
+/**
+ * Per-boot shared-secret token for the credential REST endpoints. Main
+ * generates this once, exports it as `WIRENEST_LOCAL_TOKEN` before
+ * spawning the SvelteKit server, and the broker injects it as
+ * `x-wirenest-local-token` on every `/api/credentials` request. Any
+ * other process on the box that tries to hit the endpoint without the
+ * matching header gets a 403 from `hooks.server.ts`.
+ */
+const LOCAL_API_TOKEN = randomBytes(32).toString('hex');
+process.env.WIRENEST_LOCAL_TOKEN = LOCAL_API_TOKEN;
 
 function getDataDir(): string {
 	return app.getPath('userData');
@@ -198,6 +219,84 @@ function registerIpcHandlers(): void {
 		assertAppChrome(event.sender.id);
 		return listTrustedCerts();
 	});
+
+	// Credential storage (Phase 4) — plaintext enters main process via
+	// this channel, is encrypted immediately via safeStorage, and persisted
+	// to SQLite through the SvelteKit REST endpoint. Plaintext never
+	// leaves main and is never logged.
+	ipcMain.handle('credential:save', async (event, meta: CredentialMetaInput, plaintext: string, reason?: string) => {
+		assertAppChrome(event.sender.id);
+		assertCredentialMeta(meta);
+		if (typeof plaintext !== 'string' || plaintext.length === 0) {
+			throw new Error('plaintext must be a non-empty string');
+		}
+		// Byte-length cap — a flood of 4-byte emoji would slip past a
+		// `plaintext.length` cap measured in UTF-16 code units.
+		if (Buffer.byteLength(plaintext, 'utf-8') > 100_000) {
+			throw new Error('plaintext too long (max 100_000 bytes)');
+		}
+		const reasonText = typeof reason === 'string' && reason.trim()
+			? reason.trim()
+			: 'credential save via UI';
+		return saveCredential({ baseUrl: SVELTEKIT_URL }, meta, plaintext, reasonText);
+	});
+
+	ipcMain.handle('credential:has', async (event, secretRef: string) => {
+		assertAppChrome(event.sender.id);
+		assertSecretRef(secretRef);
+		return hasCredential({ baseUrl: SVELTEKIT_URL }, secretRef);
+	});
+
+	ipcMain.handle('credential:delete', async (event, secretRef: string, reason?: string) => {
+		assertAppChrome(event.sender.id);
+		assertSecretRef(secretRef);
+		const reasonText = typeof reason === 'string' && reason.trim()
+			? reason.trim()
+			: 'credential delete via UI';
+		return deleteCredential({ baseUrl: SVELTEKIT_URL }, secretRef, reasonText);
+	});
+
+	ipcMain.handle('credential:list', async (event) => {
+		assertAppChrome(event.sender.id);
+		return listCredentials({ baseUrl: SVELTEKIT_URL });
+	});
+}
+
+const CREDENTIAL_TYPES = new Set([
+	'api_token', 'username_password', 'ssh_key', 'certificate', 'community_string',
+]);
+
+// IMPORTANT: error messages here travel back to the renderer through
+// ipcMain. Never interpolate `plaintext`, `secretRef`, or `meta` fields
+// into an Error message — only static strings or enum labels.
+function assertCredentialMeta(meta: unknown): asserts meta is CredentialMetaInput {
+	if (!meta || typeof meta !== 'object') throw new Error('meta must be an object');
+	const m = meta as Record<string, unknown>;
+	if (typeof m.name !== 'string' || !m.name.trim()) throw new Error('meta.name required');
+	if (m.name.length > 200) throw new Error('meta.name too long');
+	if (typeof m.type !== 'string' || !CREDENTIAL_TYPES.has(m.type)) {
+		throw new Error(`meta.type must be one of: ${Array.from(CREDENTIAL_TYPES).join(', ')}`);
+	}
+	if (m.username != null && (typeof m.username !== 'string' || m.username.length > 200)) {
+		throw new Error('meta.username invalid');
+	}
+	if (m.notes != null && (typeof m.notes !== 'string' || m.notes.length > 2000)) {
+		throw new Error('meta.notes invalid');
+	}
+	if (m.serviceId != null && (typeof m.serviceId !== 'number' || !Number.isInteger(m.serviceId) || m.serviceId < 1)) {
+		throw new Error('meta.serviceId must be a positive integer');
+	}
+	if (m.dataSourceId != null && (typeof m.dataSourceId !== 'number' || !Number.isInteger(m.dataSourceId) || m.dataSourceId < 1)) {
+		throw new Error('meta.dataSourceId must be a positive integer');
+	}
+	if (m.secretRef != null && (typeof m.secretRef !== 'string' || m.secretRef.length > 200)) {
+		throw new Error('meta.secretRef invalid');
+	}
+}
+
+function assertSecretRef(ref: unknown): asserts ref is string {
+	if (typeof ref !== 'string' || !ref.trim()) throw new Error('secretRef required');
+	if (ref.length > 200) throw new Error('secretRef too long');
 }
 
 /**
@@ -233,6 +332,16 @@ function shutdownDevServer(): void {
 }
 
 app.whenReady().then(async () => {
+	// Enable safeStorage encryption for trusted-certs.json (Phase 4). The
+	// first boot after upgrade auto-migrates any plaintext file in place.
+	// Falls back to plaintext on platforms where safeStorage is unavailable
+	// (e.g. Linux without libsecret) — see credentials.ts guard.
+	if (electronCredentialBackend.isAvailable()) {
+		configureCertEncryption(electronCredentialBackend);
+	} else {
+		console.warn('[certs] safeStorage unavailable — trusted-certs.json will remain in plaintext');
+	}
+
 	// Load trusted certs before anything else
 	loadTrustedCerts(getDataDir());
 
@@ -241,7 +350,9 @@ app.whenReady().then(async () => {
 
 	if (isDev) {
 		console.log(`[wirenest] Starting SvelteKit dev server on port ${SVELTEKIT_PORT}...`);
-		devServer = startSvelteKitDev(SVELTEKIT_PORT, process.cwd());
+		devServer = startSvelteKitDev(SVELTEKIT_PORT, process.cwd(), {
+			WIRENEST_LOCAL_TOKEN: LOCAL_API_TOKEN,
+		});
 
 		try {
 			await waitForServer(SVELTEKIT_URL);

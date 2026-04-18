@@ -1,0 +1,1 @@
+ALTER TABLE `credential` ADD `secret_blob` blob;

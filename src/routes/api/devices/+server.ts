@@ -6,6 +6,7 @@ import {
 	requireString, optionalString, requireEnum, optionalEnum,
 	optionalIp, optionalInt, optionalJsonObject, ValidationError,
 } from '$lib/server/validate';
+import { logMutation, newRequestId } from '$lib/server/db/changeLog';
 
 const DEVICE_TYPES = [
 	'router', 'switch', 'access_point', 'server', 'workstation',
@@ -34,56 +35,95 @@ export async function POST({ request }) {
 		const mac = optionalString(body.mac, 'mac', 17);
 		const specs = optionalJsonObject(body.specs, 'specs');
 
+		const reason = typeof body.reason === 'string' && body.reason.trim()
+			? body.reason.trim()
+			: 'user create via UI';
+		const requestId = newRequestId();
+
 		const manualSource = db.select().from(schema.dataSource)
 			.where(eq(schema.dataSource.name, 'manual')).get();
 
-		const deviceRow = db.insert(schema.device).values({
-			name,
-			hostname,
-			type,
-			role,
-			make,
-			model,
-			serialNumber,
-			os,
-			location,
-			status,
-			primaryVlanId,
-			notes,
-			sourceId: manualSource?.id,
-			specs,
-		}).returning().get();
-
-		// Create interface + IP if provided
-		if (ip && deviceRow) {
-			const ifaceRow = db.insert(schema.iface).values({
-				deviceId: deviceRow.id,
-				name: 'eth0',
-				type: 'ethernet',
-				macAddress: mac,
+		const deviceRow = db.transaction((tx) => {
+			const inserted = tx.insert(schema.device).values({
+				name,
+				hostname,
+				type,
+				role,
+				make,
+				model,
+				serialNumber,
+				os,
+				location,
+				status,
+				primaryVlanId,
+				notes,
 				sourceId: manualSource?.id,
+				specs,
 			}).returning().get();
 
-			if (ifaceRow) {
-				// Derive subnet prefix from VLAN if available, instead of hardcoding /24
-				let prefix = '24';
-				if (primaryVlanId) {
-					const vlanRow = db.select().from(schema.vlan)
-						.where(eq(schema.vlan.id, primaryVlanId)).get();
-					prefix = vlanRow?.subnet?.split('/')[1] ?? '24';
-				}
+			logMutation(tx, {
+				actor: 'user:ui',
+				objectType: 'device',
+				objectId: inserted.id,
+				action: 'create',
+				before: null,
+				after: inserted,
+				reason,
+				requestId,
+			});
 
-				db.insert(schema.ipAddress).values({
-					address: `${ip}/${prefix}`,
-					addressBare: ip,
-					ifaceId: ifaceRow.id,
-					vlanId: primaryVlanId,
-					assignmentType: 'static',
-					isPrimary: true,
+			if (ip && inserted) {
+				const ifaceRow = tx.insert(schema.iface).values({
+					deviceId: inserted.id,
+					name: 'eth0',
+					type: 'ethernet',
+					macAddress: mac,
 					sourceId: manualSource?.id,
-				}).run();
+				}).returning().get();
+
+				if (ifaceRow) {
+					logMutation(tx, {
+						actor: 'user:ui',
+						objectType: 'interface',
+						objectId: ifaceRow.id,
+						action: 'create',
+						before: null,
+						after: ifaceRow,
+						reason,
+						requestId,
+					});
+
+					let prefix = '24';
+					if (primaryVlanId) {
+						const vlanRow = tx.select().from(schema.vlan)
+							.where(eq(schema.vlan.id, primaryVlanId)).get();
+						prefix = vlanRow?.subnet?.split('/')[1] ?? '24';
+					}
+
+					const ipRow = tx.insert(schema.ipAddress).values({
+						address: `${ip}/${prefix}`,
+						addressBare: ip,
+						ifaceId: ifaceRow.id,
+						vlanId: primaryVlanId,
+						assignmentType: 'static',
+						isPrimary: true,
+						sourceId: manualSource?.id,
+					}).returning().get();
+					logMutation(tx, {
+						actor: 'user:ui',
+						objectType: 'ip_address',
+						objectId: ipRow.id,
+						action: 'create',
+						before: null,
+						after: ipRow,
+						reason,
+						requestId,
+					});
+				}
 			}
-		}
+
+			return inserted;
+		});
 
 		return json(deviceRow, { status: 201 });
 	} catch (err) {

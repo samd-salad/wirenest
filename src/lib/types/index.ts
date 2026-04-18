@@ -18,6 +18,30 @@ export interface CertificateInfo {
 	trustedAt?: string;
 }
 
+export interface CredentialMetaInput {
+	name: string;
+	type: 'api_token' | 'username_password' | 'ssh_key' | 'certificate' | 'community_string';
+	serviceId?: number | null;
+	dataSourceId?: number | null;
+	username?: string | null;
+	notes?: string | null;
+	secretRef?: string;
+}
+
+export interface CredentialRecord {
+	id: number;
+	name: string;
+	type: string;
+	serviceId: number | null;
+	dataSourceId: number | null;
+	username: string | null;
+	notes: string | null;
+	secretRef: string;
+	hasSecret: boolean;
+	createdAt: string;
+	updatedAt: string;
+}
+
 export interface WireNestAPI {
 	platform: string;
 
@@ -37,6 +61,14 @@ export interface WireNestAPI {
 	onCertUntrusted: (callback: (info: CertificateInfo) => void) => void;
 	onServiceLoadFailed: (callback: (info: { id: string; url: string; errorCode: number; errorDescription: string }) => void) => void;
 	getResourceUsage: () => Promise<{ heapUsedMB: number; rssMB: number }>;
+
+	// Credentials (Phase 4). Plaintext enters main via saveCredential and
+	// is encrypted immediately via safeStorage — the renderer can never
+	// read a plaintext secret back by design (no `getCredential` here).
+	saveCredential: (meta: CredentialMetaInput, plaintext: string, reason?: string) => Promise<CredentialRecord>;
+	hasCredential: (secretRef: string) => Promise<boolean>;
+	deleteCredential: (secretRef: string, reason?: string) => Promise<boolean>;
+	listCredentials: () => Promise<CredentialRecord[]>;
 }
 
 declare global {
@@ -84,14 +116,6 @@ export interface PanelGroup {
 	id: string;
 	direction: 'horizontal' | 'vertical';
 	panels: Panel[];
-}
-
-export interface Bookmark {
-	id: string;
-	title: string;
-	icon: string;
-	/** Tab to open when clicked */
-	tab: Omit<Tab, 'id'>;
 }
 
 export interface WikiPage {

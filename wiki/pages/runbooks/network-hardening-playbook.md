@@ -1,10 +1,19 @@
 ---
 title: Network Hardening Playbook
+slug: network-hardening-playbook
 type: runbook
-tags: [security, hardening, pfsense, switch, ids, todo]
-sources: [raw/network-hardening-todo.md]
+status: current
 created: 2026-04-12
-updated: 2026-04-12
+updated: 2026-04-17
+last_verified: 2026-04-17
+confidence: high
+sources:
+  - raw/network-hardening-todo.md
+related:
+  - pages/runbooks/pfsense-firewall-rules.md
+  - pages/decisions/adr-001-security-stack-rollout.md
+  - pages/concepts/dns-architecture.md
+tags: [security, hardening, pfsense, switch, ids, todo]
 ---
 
 # Network Hardening Playbook
@@ -19,7 +28,7 @@ Phased security hardening plan for the kingdahm.com homelab. Tracks completed wo
 - [x] Inter-VLAN firewall rules implemented -- see [[pfsense-firewall-rules]]
 - [x] Pi-hole active as DNS server, cross-VLAN access working -- see [[dns-architecture]]
 - [x] pfBlockerNG IP blocking enabled on WAN
-- [x] DHCP snooping on Aruba 1930 (Port 1 trusted)
+- [x] Switch migrated Aruba 1930 → Cisco SG200-26P (2026-04-12) -- see [[migrate-aruba-to-sg200]]
 - [x] Deny unknown DHCP clients on Management, Trusted, and Servers VLANs
 - [x] Static DHCP mappings for known devices
 - [x] DNS-over-TLS upstream via pfSense DNS Resolver (2026-04-07)
@@ -46,32 +55,20 @@ Items discovered during config audit. Small fixes with real security impact. See
 
 ---
 
-## Phase 2: Switch Security
+## Phase 2: Switch Security (SG200-26P)
 
-### Dynamic ARP Inspection (DAI) on Aruba 1930
-**Why:** Without DAI, any device on a VLAN can ARP spoof and intercept all traffic between hosts. Most common Layer 2 attack.
+> **Regression from the Aruba:** DHCP snooping, DAI, and robust port security were all available on the 1930 but are **not** supported by the SG200 (SG300+ only). The SG200 was accepted as a hand-me-down port-count upgrade — see [[migrate-aruba-to-sg200]] for the why. The mitigation is to treat the switch as inside the trust boundary (firewalled behind pfSense on isolated VLAN 10) and rely on pfSense + DHCP policy for the Layer 2 attacks those features would have covered.
 
-**Prerequisite:** DHCP snooping must be running and the binding table populated.
+### Not available on SG200 (documented for awareness)
+- **DHCP snooping** — not supported. Rogue DHCP detection has to come from pfSense DHCP logs + known-clients-only policy on sensitive VLANs.
+- **Dynamic ARP Inspection (DAI)** — not supported. ARP-spoofing defense is physical security + VLAN isolation.
+- **MAC-based port security** — not supported in a useful form. Managed via DHCP reservations.
 
-1. **Security > ARP Protection** -- enable on each VLAN
-2. Trust Port 1 (pfSense uplink)
-3. **Important:** Static-IP devices need manual ARP inspection entries or their traffic will be blocked
-4. Test from Meatwad after enabling
+### Storm Control (available — consider if needed)
+The SG200 does support basic storm control. Leave it off by default and only enable if a broadcast storm is observed.
 
-### Port Security on Aruba 1930
-**Why:** Prevents MAC flooding attacks and unauthorized switches/hubs.
-
-1. **Security > Port Security**
-2. Access ports: limit to 1-2 MAC addresses (1 for Management, 1-2 for IoT)
-3. Trunk/uplink ports: no limit
-4. Violation action: restrict (drop + log, keeps port up for visibility)
-
-### Storm Control on Aruba 1930
-**Why:** A compromised or malfunctioning device flooding broadcasts can degrade the entire VLAN.
-
-1. Enable broadcast, multicast, and unknown unicast storm control on all access ports
-2. Threshold: 10-20% of port bandwidth
-3. Leave trunk ports without storm control
+### Harden the SG200 itself
+See [[sg200-lockdown]] — disable SNMP/CDP/Auto Smartports, HTTPS only, management-VLAN-only access, NTP pointing at pfSense.
 
 ---
 

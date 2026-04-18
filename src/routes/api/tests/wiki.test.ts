@@ -118,6 +118,18 @@ describe('GET /api/wiki — list pages', () => {
 		expect(res.body.pages).toHaveLength(1);
 		expect(res.body.pages[0].name).toBe('page.md');
 	});
+
+	it('walks subdirectories recursively', async () => {
+		mkdirSync(path.join(tmpRoot, 'wiki', 'pages', 'vlans'), { recursive: true });
+		mkdirSync(path.join(tmpRoot, 'wiki', 'pages', 'devices'), { recursive: true });
+		writeFileSync(path.join(tmpRoot, 'wiki', 'pages', 'vlans', 'vlan-20.md'), '# VLAN 20');
+		writeFileSync(path.join(tmpRoot, 'wiki', 'pages', 'devices', 'pve01.md'), '# pve01');
+		const GET = await loadHandler();
+		const res: any = await (GET as any)({});
+		expect(res.body.pages).toHaveLength(2);
+		const paths = res.body.pages.map((p: any) => p.path).sort();
+		expect(paths).toEqual(['pages/devices/pve01.md', 'pages/vlans/vlan-20.md']);
+	});
 });
 
 describe('GET /api/wiki/[...path] — read page', () => {
@@ -232,18 +244,53 @@ describe('PUT /api/wiki/[...path] — update/rename page', () => {
 		).rejects.toMatchObject({ status: 400 });
 	});
 
-	it('prevents path traversal on rename', async () => {
+	it('rejects renames containing path separators', async () => {
 		writeFileSync(path.join(tmpRoot, 'wiki', 'pages', 'test.md'), '# Content');
 		const { PUT } = await loadHandlers();
-		// basename() strips path components, so this becomes just "escape.md"
-		// and the rename goes into pages/ — verify it doesn't escape
-		await PUT({
-			params: { path: 'pages/test.md' },
-			request: makeRequest({ newName: '../../escape.md' }),
-		} as any);
+		// Any path separator — whether a traversal (`..`) or a sibling
+		// directory hop — is rejected at the top of the handler, before
+		// basename() could silently strip it.
+		await expect(
+			PUT({
+				params: { path: 'pages/test.md' },
+				request: makeRequest({ newName: '../../escape.md' }),
+			} as any),
+		).rejects.toMatchObject({ status: 400 });
 
-		// Should NOT have created file outside pages/
+		// Original file must still be in place and nothing escaped.
+		expect(existsSync(path.join(tmpRoot, 'wiki', 'pages', 'test.md'))).toBe(true);
 		expect(existsSync(path.join(tmpRoot, 'escape.md'))).toBe(false);
 		expect(existsSync(path.join(tmpRoot, 'wiki', 'escape.md'))).toBe(false);
+	});
+
+	it('rejects a rename that would clobber an existing file', async () => {
+		writeFileSync(path.join(tmpRoot, 'wiki', 'pages', 'test.md'), '# source');
+		writeFileSync(path.join(tmpRoot, 'wiki', 'pages', 'target.md'), '# existing target');
+		const { PUT } = await loadHandlers();
+		await expect(
+			PUT({
+				params: { path: 'pages/test.md' },
+				request: makeRequest({ newName: 'target.md' }),
+			} as any),
+		).rejects.toMatchObject({ status: 409 });
+		// Both files untouched
+		expect(readFileSync(path.join(tmpRoot, 'wiki', 'pages', 'test.md'), 'utf-8')).toContain('source');
+		expect(readFileSync(path.join(tmpRoot, 'wiki', 'pages', 'target.md'), 'utf-8')).toContain('existing target');
+	});
+
+	it('preserves the directory when the file name matches the parent', async () => {
+		// Regression: previously `reqPath.replace(basename(...), newName)`
+		// corrupted paths where the directory shares the filename.
+		const dir = path.join(tmpRoot, 'wiki', 'pages', 'pve01');
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(path.join(dir, 'pve01.md'), '# old');
+		const { PUT } = await loadHandlers();
+		const result = (await PUT({
+			params: { path: 'pages/pve01/pve01.md' },
+			request: makeRequest({ newName: 'pve02.md' }),
+		} as any)) as unknown as { body: { path: string } };
+		expect(result.body.path).toBe('pages/pve01/pve02.md');
+		expect(existsSync(path.join(dir, 'pve02.md'))).toBe(true);
+		expect(existsSync(path.join(dir, 'pve01.md'))).toBe(false);
 	});
 });

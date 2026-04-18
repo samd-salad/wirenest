@@ -1,10 +1,20 @@
 ---
 title: pfSense Firewall Rules
+slug: pfsense-firewall-rules
 type: runbook
-tags: [pfsense, firewall, vlans, security, inter-vlan]
-sources: [raw/pfsense-firewall-rules.md]
+status: current
 created: 2026-04-12
-updated: 2026-04-12
+updated: 2026-04-17
+last_verified: 2026-04-17
+confidence: high
+sources:
+  - raw/pfsense-firewall-rules.md
+related:
+  - pages/concepts/network-architecture.md
+  - pages/concepts/dns-architecture.md
+  - pages/runbooks/network-hardening-playbook.md
+  - pages/runbooks/pfsense-block-to-self.md
+tags: [pfsense, firewall, vlans, security, inter-vlan]
 ---
 
 # pfSense Firewall Rules -- Inter-VLAN Policy
@@ -167,6 +177,7 @@ ping 8.8.8.8                      # should reach internet
 - **IoT and Guest** are the most locked down -- internet-only by design.
 - **Logging** on block rules helps catch misconfigured devices trying to bypass DNS filtering.
 - **Default deny:** pfSense denies anything not explicitly passed. No explicit "block all" rules needed at the bottom.
+- **Native LAN interface is unused.** All real traffic rides VLANs (opt1–opt6); the native LAN interface is just the trunk parent with no hosts on it. It has no pass rules, so default-deny covers it. Any redundant explicit "block LAN to any" rules can be (and have been) removed — they were noise. Before re-adding hosts on native LAN, check Status → DHCP Leases on the LAN interface and verify nothing is plugged into an untagged port.
 
 ## Troubleshooting
 
@@ -174,6 +185,7 @@ ping 8.8.8.8                      # should reach internet
 - **Can't reach pfSense GUI:** Check anti-lockout rule. Access via console if locked out.
 - **IoT device can't function:** Check if it uses hardcoded DNS (e.g., Google Nest 8.8.8.8) -- rogue DNS block will break it intentionally. Check logs.
 - **DoT bypass rules showing as Pass:** Known misconfig (#2, #4, #5). Change to Block in pfSense GUI.
+- **All hostnames fail to resolve, Pi-hole reachable but queries time out:** Pi-hole's upstream is pfSense Unbound, so a "block MANAGEMENT to This Firewall" rule on opt1 will silently kill recursive resolution. Pi-hole still answers `pi.hole` from cache, masking the issue. Add `pass PIHOLE → This Firewall TCP/UDP 53,853` above the block-to-self rule on opt1. See [[pfsense-block-to-self]] for the full incident writeup.
 
 ## Related
 

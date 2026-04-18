@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import {
 	requireString, optionalString, optionalEnum, ValidationError,
 } from '$lib/server/validate';
+import { logMutation, newRequestId } from '$lib/server/db/changeLog';
 
 const BUILD_STATUSES = ['planning', 'ordering', 'building', 'complete', 'abandoned'] as const;
 
@@ -16,13 +17,30 @@ export async function POST({ request }) {
 		const description = optionalString(body.description, 'description', 5000);
 		const status = optionalEnum(body.status, 'status', [...BUILD_STATUSES]) ?? 'planning';
 		const notes = optionalString(body.notes, 'notes', 5000);
+		const reason = typeof body.reason === 'string' && body.reason.trim()
+			? body.reason.trim()
+			: 'user create via UI';
+		const requestId = newRequestId();
 
-		const buildRow = db.insert(schema.build).values({
-			name,
-			description,
-			status,
-			notes,
-		}).returning().get();
+		const buildRow = db.transaction((tx) => {
+			const inserted = tx.insert(schema.build).values({
+				name,
+				description,
+				status,
+				notes,
+			}).returning().get();
+			logMutation(tx, {
+				actor: 'user:ui',
+				objectType: 'build',
+				objectId: inserted.id,
+				action: 'create',
+				before: null,
+				after: inserted,
+				reason,
+				requestId,
+			});
+			return inserted;
+		});
 
 		return json(buildRow, { status: 201 });
 	} catch (err) {

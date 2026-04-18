@@ -67,7 +67,7 @@ describe('sync tools', () => {
     registerSyncTools(server);
   });
 
-  describe('wirenest_sync_pihole', () => {
+  describe('sot.sync_pihole', () => {
     it('creates new devices from Pi-hole clients', async () => {
       mockResponses = {
         '/api/auth': { session: { sid: 'test-sid' } },
@@ -80,7 +80,7 @@ describe('sync tools', () => {
         '/api/devices': { devices: [] }, // No existing devices
       };
 
-      const result = await callTool(server, 'wirenest_sync_pihole', {});
+      const result = await callTool(server, 'sot.sync_pihole', {});
       expect(result.isError).toBeFalsy();
       expect(result.content[0].text).toContain('2 created');
       expect(result.content[0].text).toContain('0 updated');
@@ -109,7 +109,7 @@ describe('sync tools', () => {
       // Also mock the PUT endpoint
       mockResponses['/api/devices/1'] = { id: 1 };
 
-      const result = await callTool(server, 'wirenest_sync_pihole', {});
+      const result = await callTool(server, 'sot.sync_pihole', {});
       expect(result.content[0].text).toContain('0 created');
       expect(result.content[0].text).toContain('1 updated');
     });
@@ -129,7 +129,7 @@ describe('sync tools', () => {
         },
       };
 
-      const result = await callTool(server, 'wirenest_sync_pihole', {});
+      const result = await callTool(server, 'sot.sync_pihole', {});
       expect(result.content[0].text).toContain('0 created');
       expect(result.content[0].text).toContain('0 updated');
       expect(result.content[0].text).toContain('1 skipped');
@@ -147,7 +147,7 @@ describe('sync tools', () => {
         '/api/devices': { devices: [] },
       };
 
-      const result = await callTool(server, 'wirenest_sync_pihole', { dryRun: true });
+      const result = await callTool(server, 'sot.sync_pihole', { dryRun: true });
       expect(result.content[0].text).toContain('[DRY RUN]');
       expect(result.content[0].text).toContain('1 created');
 
@@ -161,7 +161,7 @@ describe('sync tools', () => {
     });
   });
 
-  describe('wirenest_sync_dhcp', () => {
+  describe('sot.sync_dhcp', () => {
     it('creates new devices from DHCP leases', async () => {
       mockResponses = {
         '/api/v1/services/dhcpd/lease': {
@@ -173,7 +173,7 @@ describe('sync tools', () => {
         '/api/devices': { devices: [] },
       };
 
-      const result = await callTool(server, 'wirenest_sync_dhcp', {});
+      const result = await callTool(server, 'sot.sync_dhcp', {});
       expect(result.content[0].text).toContain('2 created');
     });
 
@@ -192,7 +192,7 @@ describe('sync tools', () => {
         '/api/devices/5': { id: 5 },
       };
 
-      const result = await callTool(server, 'wirenest_sync_dhcp', {});
+      const result = await callTool(server, 'sot.sync_dhcp', {});
       expect(result.content[0].text).toContain('1 updated');
       expect(result.content[0].text).toContain('0 created');
     });
@@ -203,12 +203,12 @@ describe('sync tools', () => {
         '/api/devices': { devices: [] },
       };
 
-      const result = await callTool(server, 'wirenest_sync_dhcp', {});
+      const result = await callTool(server, 'sot.sync_dhcp', {});
       expect(result.content[0].text).toContain('No DHCP leases found');
     });
   });
 
-  describe('wirenest_sync_arp', () => {
+  describe('sot.sync_arp', () => {
     it('updates MAC addresses on matched devices', async () => {
       mockResponses = {
         '/api/v1/diagnostics/arp': {
@@ -227,7 +227,7 @@ describe('sync tools', () => {
         '/api/devices/2': { id: 2 },
       };
 
-      const result = await callTool(server, 'wirenest_sync_arp', {});
+      const result = await callTool(server, 'sot.sync_arp', {});
       expect(result.content[0].text).toContain('2 updated');
 
       // Verify PUT calls
@@ -245,7 +245,7 @@ describe('sync tools', () => {
         '/api/devices': { devices: [] },
       };
 
-      const result = await callTool(server, 'wirenest_sync_arp', {});
+      const result = await callTool(server, 'sot.sync_arp', {});
       expect(result.content[0].text).toContain('0 updated');
       expect(result.content[0].text).toContain('1 skipped');
     });
@@ -264,7 +264,7 @@ describe('sync tools', () => {
         },
       };
 
-      const result = await callTool(server, 'wirenest_sync_arp', {});
+      const result = await callTool(server, 'sot.sync_arp', {});
       expect(result.content[0].text).toContain('0 updated');
     });
 
@@ -282,7 +282,7 @@ describe('sync tools', () => {
         },
       };
 
-      const result = await callTool(server, 'wirenest_sync_arp', {});
+      const result = await callTool(server, 'sot.sync_arp', {});
       expect(result.content[0].text).toContain('0 updated');
     });
   });

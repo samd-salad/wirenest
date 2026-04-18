@@ -17,8 +17,10 @@
 	let allPanels = $derived($panels);
 	let hasAnyTabs = $derived(allPanels.some((p) => p.tabs.length > 0));
 
-	// Wiki doc content cache
-	let docCache = $state<Record<string, string>>({});
+	// Wiki doc content cache — stores rendered HTML from the server when
+	// available, or raw markdown to be client-rendered as a fallback.
+	type DocEntry = { html: string } | { raw: string };
+	let docCache = $state<Record<string, DocEntry>>({});
 	let docLoading = $state<Record<string, boolean>>({});
 	let docError = $state<Record<string, string>>({});
 
@@ -94,12 +96,23 @@
 			const res = await fetch(`/api/wiki/${path}`);
 			if (!res.ok) throw new Error('Not found');
 			const data = await res.json();
-			docCache = { ...docCache, [path]: data.content };
+			// Prefer server-rendered HTML when present (markers + aliases +
+			// wikilinks all resolved). Fall back to client-side marked for
+			// paths the server didn't render (non-.md, render errors).
+			const entry: DocEntry =
+				typeof data.rendered === 'string'
+					? { html: data.rendered }
+					: { raw: data.content ?? '' };
+			docCache = { ...docCache, [path]: entry };
 		} catch {
 			docError = { ...docError, [path]: 'Failed to load page.' };
 		} finally {
 			docLoading = { ...docLoading, [path]: false };
 		}
+	}
+
+	function renderDocEntry(entry: DocEntry): string {
+		return 'html' in entry ? entry.html : markdownToHtml(entry.raw);
 	}
 
 	$effect(() => {
@@ -481,7 +494,7 @@
 								<!-- svelte-ignore a11y_click_events_have_key_events -->
 								<!-- svelte-ignore a11y_no_static_element_interactions -->
 								<div class="wiki-content" onclick={handleWikiLinkClick}>
-									{@html markdownToHtml(docCache[activeTab.docPath])}
+									{@html renderDocEntry(docCache[activeTab.docPath])}
 								</div>
 							{:else}
 								<div class="placeholder-content">

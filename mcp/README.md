@@ -1,58 +1,70 @@
 # MCP Homelab
 
-Model Context Protocol server for homelab infrastructure management.
+Model Context Protocol server for WireNest and the surrounding homelab services.
 
-Uses **WireNest** as the single source of truth for device inventory, network topology,
-and build tracking. Also connects directly to service APIs for real-time data and actions.
+The MCP surface is now shrunk to two namespaces:
+
+- **`sot.*`** — reads and writes against the WireNest Source of Truth (devices, VLANs, builds, change log, sync)
+- **`wiki.*`** — reads and writes the markdown wiki that sits beside the SoT
+
+Live-API helpers for Pi-hole and pfSense/OPNsense remain under their own names (`pihole_*`, `firewall_*`) because they hit external services directly, not the SoT.
 
 ## Prerequisites
 
-The MCP server reads and writes state through the WireNest REST API at
-`http://localhost:5180`. The Electron app must be running before you invoke
-any `wirenest_*` tool:
+The SoT tools read and write through the WireNest REST API at `http://localhost:5180`. Start the Electron app before calling any `sot.*` tool:
 
 ```bash
 cd /path/to/wirenest
 pnpm dev          # starts Electron + SvelteKit dev server on port 5180
 ```
 
-Wiki tools (`wirenest_wiki_*`) read and write markdown files directly and work
-even when the app isn't running.
+Wiki tools read and write markdown files directly and work even when the app isn't running.
 
 ## Tools
 
-### WireNest (inventory + builds)
-- `wirenest_list_devices` — all devices with IPs, VLANs, specs
-- `wirenest_get_device` — full device detail with cross-references
-- `wirenest_list_vlans` — all VLANs with devices
-- `wirenest_get_vlan` — full VLAN detail
-- `wirenest_list_builds` — all builds with parts and costs
-- `wirenest_get_build` — full build detail
-- `wirenest_search_devices` — search by name, IP, type, VLAN
-- `wirenest_create_device` — add a device
-- `wirenest_update_device` — update a device
-- `wirenest_add_build_part` — add a part to a build
-- `wirenest_export_all` — export everything as YAML
+### `sot.*` — Source of Truth (WireNest DB)
 
-### Wiki (knowledge base)
-- `wirenest_wiki_list` — list all pages with titles, types, summaries
-- `wirenest_wiki_read` — read a page by path
-- `wirenest_wiki_write` — create or update a page (auto-updates index + log)
-- `wirenest_wiki_search` — search pages by keyword
+| Tool | Purpose |
+|---|---|
+| `sot.search` | Full-text search across types (device, vlan, build, …) |
+| `sot.list` | Filtered listing by type — `{ type, filter? }` |
+| `sot.get` | One object by ref (`device:7`, `vlan:20`, …), optionally with change history |
+| `sot.dependents` | One- or two-level FK walk — "what touches this?" |
+| `sot.changes_since` | Paginated change_log query — the fresh-session catch-up tool |
+| `sot.create` | Create an SoT row (requires `reason`) |
+| `sot.update` | Partial update of an SoT row (requires `reason`) |
+| `sot.delete` | Delete an SoT row (requires `reason`) |
+| `sot.export` | Export everything as YAML for backup |
+| `sot.sync_pihole` | Reconcile Pi-hole devices into the SoT (match by MAC/IP) |
+| `sot.sync_dhcp` | Reconcile pfSense/OPNsense DHCP leases into the SoT |
+| `sot.sync_arp` | Reconcile pfSense/OPNsense ARP table — MAC updates only |
 
-### Sync (data import)
-- `wirenest_sync_pihole` — sync Pi-hole network devices into WireNest (match by MAC/IP)
-- `wirenest_sync_dhcp` — sync pfSense/OPNsense DHCP leases into WireNest
-- `wirenest_sync_arp` — update MAC addresses from pfSense/OPNsense ARP table
+**Refs.** Every write or read-one tool identifies an object by a `type:id` ref string: `device:7`, `vlan:20`, `build:3`. Keeps the surface consistent across types.
 
-### Pi-hole (DNS)
+**Reasons are mandatory on writes.** `sot.create`, `sot.update`, `sot.delete`, and `wiki.write` all require a non-empty `reason` string. The reason lands in `change_log.reason` (or the wiki `log.md`) so postmortems can explain intent.
+
+### `wiki.*` — narrative knowledge base
+
+| Tool | Purpose |
+|---|---|
+| `wiki.list` | List all pages with titles, types, and tags |
+| `wiki.read` | Read a page's raw markdown by path |
+| `wiki.write` | Create or update a page (requires `reason`); auto-updates `index.md` and appends to `log.md` |
+| `wiki.search` | Full-text search across titles, tags, and bodies |
+| `wiki.create_page` | Stamp a new page from a type-specific template (device, vlan, service, runbook, decision, postmortem, concept, reference) |
+
+Rendering (`@sot:`/`@api:` markers, alias auto-linking, staleness banner, backlinks) happens in the Electron app's wiki API — the MCP `wiki.read` returns raw markdown so agents can edit round-trip.
+
+### `pihole_*` — DNS service (live API)
+
 - `pihole_stats` — query stats, blocked count, percentages
 - `pihole_top_blocked` — top blocked domains
 - `pihole_top_clients` — top querying clients
 - `pihole_network_devices` — all devices seen by Pi-hole
 - `pihole_toggle_blocking` — enable/disable blocking
 
-### pfSense / OPNsense (firewall)
+### `firewall_*` — pfSense / OPNsense (live API)
+
 - `firewall_get_rules` — firewall rules (filterable by interface)
 - `firewall_get_interfaces` — network interfaces
 - `firewall_get_dhcp_leases` — active DHCP leases
@@ -68,9 +80,7 @@ npm install
 
 ### For Claude Code
 
-Add the server to `.claude/settings.local.json` in the WireNest repo (project-local,
-preferred) or `~/.claude/settings.json` (global). Replace the path and credentials
-with your own:
+Add the server to `.claude/settings.local.json` in the WireNest repo (project-local, preferred) or `~/.claude/settings.json` (global). Replace the path and credentials with your own:
 
 ```json
 {
@@ -92,7 +102,7 @@ with your own:
 }
 ```
 
-After editing, restart Claude Code. The 28 tools appear in the tool palette.
+After editing, restart Claude Code. The tool palette will show `sot.*`, `wiki.*`, `pihole_*`, and `firewall_*` groups.
 
 ### Environment Variables
 
@@ -114,36 +124,40 @@ After editing, restart Claude Code. The 28 tools appear in the tool palette.
 | `PROXMOX_TOKEN_ID` | No | Proxmox API token ID |
 | `PROXMOX_TOKEN_SECRET` | No | Proxmox API token secret |
 
+## Killer workflows
+
+- **Onboard a fresh session:** `sot.get("vlan:20")` → `sot.dependents("vlan:20")` → `wiki.read("pages/vlans/vlan-20.md")`. Three tool calls, full context.
+- **What changed this week:** `sot.changes_since("<7 days ago>")` → `wiki.search(...)` for related notes → generate a digest.
+- **Blast radius check:** `sot.dependents("device:pve01", { depth: 2 })` returns everything within two FK hops.
+- **Plan a new build:** `sot.list("device", { status: "planned" })` → `wiki.create_page("build", ...)` → `sot.create("build", ..., reason)`.
+
 ## Error handling
 
-All HTTP calls have a 10-second timeout. Connection failures surface clear
-messages so agents know what to do:
+All HTTP calls have a 10-second timeout. Connection failures surface clear messages so agents know what to do:
 
 - `WireNest API unreachable at http://localhost:5180 — start the Electron app with 'pnpm dev'`
 - `WireNest API timed out — is the Electron app running at http://localhost:5180?`
 - `Pi-hole unreachable at http://10.0.10.3`
 - `Firewall at https://10.0.10.1 did not respond in time`
 
-If a service isn't configured, the tool returns an `isError: true` response
-with a message identifying the missing env var.
+If a service isn't configured, the tool returns an `isError: true` response with a message identifying the missing env var.
 
 ## Tests
 
 ```bash
-npm test           # Run all 44 tests once
+npm test           # Run all tests once
 npm run test:watch # Watch mode
 ```
 
 Test coverage:
 - `http.test.ts` — fetch timeout, HTTP/network/timeout errors, headers/body forwarding
 - `sync.test.ts` — Pi-hole/DHCP/ARP sync with mocked fetch, dry-run mode, user overrides
-- `wiki.test.ts` — list/read/write/search, frontmatter parsing, index/log updates,
-  path traversal prevention
+- `wiki.test.ts` — `wiki.list`/`wiki.read`/`wiki.write`/`wiki.search`/`wiki.create_page`, frontmatter parsing, index/log updates, path traversal prevention, reason enforcement
 
 ## Testing against a live app
 
 1. Start the Electron app: `pnpm dev` in the repo root
-2. In another terminal or Claude Code session, invoke any `wirenest_*` tool
-3. Verify the wiki loop: have one session write a page, then another read it
-4. Verify the sync loop: run `wirenest_sync_pihole` (dry-run first), then read
-   the updated device list via `wirenest_list_devices`
+2. In another terminal or Claude Code session, invoke any `sot.*` tool
+3. Verify the wiki loop: have one session write a page (with `reason`), then another read it
+4. Verify the sync loop: run `sot.sync_pihole` (dry-run first), then read the updated device list via `sot.list("device")`
+5. Verify the audit: after a write, `sot.changes_since("<now - 1m>")` should return the new `change_log` row

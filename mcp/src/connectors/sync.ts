@@ -152,7 +152,7 @@ function findExisting(
 
 export function registerSyncTools(server: McpServer) {
 
-  server.tool('wirenest_sync_pihole',
+  server.tool('sot.sync_pihole',
     'Sync Pi-hole network devices into WireNest. Creates new devices or updates existing ones (matched by MAC/IP). User overrides are preserved.',
     { dryRun: z.boolean().optional().describe('If true, show what would change without writing') },
     async ({ dryRun }) => {
@@ -226,7 +226,7 @@ export function registerSyncTools(server: McpServer) {
     }
   );
 
-  server.tool('wirenest_sync_dhcp',
+  server.tool('sot.sync_dhcp',
     'Sync pfSense/OPNsense DHCP leases into WireNest. Creates new devices or updates existing ones (matched by MAC/IP). User overrides are preserved.',
     { dryRun: z.boolean().optional().describe('If true, show what would change without writing') },
     async ({ dryRun }) => {
@@ -307,7 +307,7 @@ export function registerSyncTools(server: McpServer) {
     }
   );
 
-  server.tool('wirenest_sync_arp',
+  server.tool('sot.sync_arp',
     'Sync pfSense/OPNsense ARP table into WireNest. Updates MAC addresses on devices matched by IP. Does not create new devices.',
     { dryRun: z.boolean().optional().describe('If true, show what would change without writing') },
     async ({ dryRun }) => {

@@ -2,4 +2,3 @@ import { writable } from 'svelte/store';
 
 export const sidebarOpen = writable(true);
 export const sidebarWidth = writable(280);
-export const sidebarView = writable<'docs' | 'services' | 'bookmarks'>('services');

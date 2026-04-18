@@ -1,10 +1,19 @@
 ---
 title: EAP670 Setup and Hardening
-type: guide
-tags: [eap670, wifi, ap, standalone, vlans, hardening]
-sources: [raw/setup-eap670.md]
+slug: setup-eap670
+type: runbook
+status: current
 created: 2026-04-12
-updated: 2026-04-12
+updated: 2026-04-17
+last_verified: 2026-04-17
+confidence: high
+sources:
+  - raw/setup-eap670.md
+related:
+  - pages/concepts/network-architecture.md
+  - pages/runbooks/pfsense-firewall-rules.md
+  - pages/runbooks/flash-r7000p-ddwrt.md
+tags: [eap670, wifi, ap, standalone, vlans, hardening]
 ---
 
 # EAP670 Setup and Hardening
@@ -21,7 +30,7 @@ TP-Link EAP670 running in standalone mode (no Omada Controller). Bridges WiFi cl
 | fart-museum-iot | 2.4 GHz | 40 (IoT) | WPA2 | Hidden | Smart home devices |
 | Tom's Friends | 2.4 GHz | 50 (Guest) | WPA2 | Yes | Visitors |
 
-AP management: 10.0.10.7 (VLAN 10), MAC 0c:ef:15:c0:e1:8a, Switch port 3, PoE+ from Aruba 1930.
+AP management: 10.0.10.7 (VLAN 10), MAC 0c:ef:15:c0:e1:8a, on switchhitter (Cisco SG200-26P) port gi13, PoE from the switch (SG200 PoE budget: 12W/port, 100W total across ports 1–12).
 
 ## Critical Warnings
 
@@ -32,7 +41,7 @@ AP management: 10.0.10.7 (VLAN 10), MAC 0c:ef:15:c0:e1:8a, Switch port 3, PoE+ f
 
 ## Prerequisites
 
-- Aruba 1930 port 3: PVID 10 (untagged), tagged 25, 40, 50
+- switchhitter (SG200) port gi13: General mode, PVID 10 (untagged), tagged 25, 40, 50
 - pfSense DHCP static mapping: 0c:ef:15:c0:e1:8a -> 10.0.10.7 on VLAN 10
 - pfSense firewall: Trusted (VLAN 20) allowed HTTPS/SSH to Management subnet
 

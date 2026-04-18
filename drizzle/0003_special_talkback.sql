@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `uq_credential_secret_ref` ON `credential` (`secret_ref`);

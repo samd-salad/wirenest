@@ -1,10 +1,17 @@
 ---
 title: Flash R7000P with DD-WRT (Archived)
-type: guide
-tags: [r7000p, ddwrt, wifi, vlans, archived]
-sources: [raw/flash-r7000p-ddwrt.md]
+slug: flash-r7000p-ddwrt
+type: runbook
+status: outdated
 created: 2026-04-12
-updated: 2026-04-12
+updated: 2026-04-17
+last_verified: 2026-04-12
+confidence: medium
+sources:
+  - raw/flash-r7000p-ddwrt.md
+related:
+  - pages/runbooks/setup-eap670.md
+tags: [r7000p, ddwrt, wifi, vlans, archived]
 ---
 
 # Flash R7000P with DD-WRT (Archived)

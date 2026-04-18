@@ -1,10 +1,21 @@
 ---
 title: DNS Architecture
+slug: dns-architecture
 type: concept
-tags: [dns, pihole, pfsense, dot, quad9, security]
-sources: [raw/network-overview.md]
+status: current
 created: 2026-04-12
-updated: 2026-04-12
+updated: 2026-04-17
+last_verified: 2026-04-17
+confidence: high
+sources:
+  - raw/network-overview.md
+related:
+  - pages/runbooks/pfsense-firewall-rules.md
+  - pages/runbooks/network-hardening-playbook.md
+  - pages/concepts/network-architecture.md
+aliases:
+  - dns-architecture
+tags: [dns, pihole, pfsense, dot, quad9, security]
 ---
 
 # DNS Architecture

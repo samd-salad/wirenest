@@ -38,6 +38,26 @@ export function requireEnum<T extends string>(val: unknown, name: string, valid:
 	return val as T;
 }
 
+/**
+ * Strictly parse a positive integer route parameter. Rejects everything
+ * `parseInt` silently accepts — `"7.5"`, `"7e10"`, `"-5"`, `" 7 "`,
+ * `"007"` all fail. Returns the integer or null if invalid. Callers
+ * should turn null into a 400 JSON response.
+ *
+ * parseInt used to be sprinkled across every `/api/[id]/` route and
+ * would happily truncate malformed input — so `DELETE /api/devices/7.5`
+ * silently deleted device 7. This helper is the one way to parse IDs.
+ */
+export function parseRouteId(val: unknown): number | null {
+	if (typeof val !== 'string') return null;
+	// Require a clean all-digits string — no leading zeros except "0"
+	// itself (we reject 0 below), no sign, no decimal, no exponent.
+	if (!/^(?:0|[1-9]\d*)$/.test(val)) return null;
+	const n = Number(val);
+	if (!Number.isSafeInteger(n) || n < 1) return null;
+	return n;
+}
+
 export function optionalEnum<T extends string>(val: unknown, name: string, valid: T[]): T | undefined {
 	if (val === undefined || val === null || val === '') return undefined;
 	if (typeof val !== 'string' || !valid.includes(val as T)) {

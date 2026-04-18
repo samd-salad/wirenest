@@ -1,10 +1,18 @@
 ---
 title: Proxmox Cluster Setup
-type: guide
-tags: [proxmox, cluster, snap, crackle, qdevice, servers]
-sources: [raw/proxmox-cluster-setup.md]
+slug: proxmox-cluster-setup
+type: runbook
+status: current
 created: 2026-04-12
-updated: 2026-04-12
+updated: 2026-04-17
+last_verified: 2026-04-17
+confidence: medium
+sources:
+  - raw/proxmox-cluster-setup.md
+related:
+  - pages/decisions/adr-002-container-architecture.md
+  - pages/concepts/network-architecture.md
+tags: [proxmox, cluster, snap, crackle, qdevice, servers]
 ---
 
 # Proxmox Cluster Setup
@@ -78,7 +86,7 @@ DNS redundancy. If Pi 3B+ goes down, DNS continues.
 6. DHCP reservations for snap (10.0.30.11) and crackle (10.0.30.12)
 7. Switch: SFP 1 for Snap, SFP 2 for Crackle, both PVID 30
 
-**SFP compatibility:** Aruba 1930 supports generic 1000BASE-T SFP modules (~$15 each), not vendor-locked.
+**SFP compatibility:** switchhitter (Cisco SG200-26P) accepts generic 1000BASE-T SFP modules (~$15 each), not vendor-locked. The Aruba 1930 this replaced had the same openness — either switch works for the same modules if one is ever swapped back in.
 
 ## Phase 4: Snap -- Install Proxmox
 

@@ -10,28 +10,47 @@ Harden it like a domain controller.
 
 > Read this section first. Everything below describes the intended design.
 > This section tells you what is actually true today.
+>
+> Last updated 2026-04-17.
 
 ### What is implemented (DONE)
-- Input validation on all API endpoints (`$lib/server/validate.ts`)
+- Input validation on all API endpoints (`$lib/server/validate.ts`, including strict `parseRouteId` that rejects `"7.5"`, `"7e10"`, etc. — parsed IDs are positive safe integers or a 400)
 - XSS sanitization on wiki markdown rendering
 - CSRF protection on mutating endpoints
 - pnpm strict isolation, `save-exact` in `.npmrc`
-- MCP server uses env vars for service credentials — secrets never stored in the MCP codebase
+- **Process isolation (Phase 2)** — services load in separate `WebContentsView` renderer processes with `sandbox: true`, `contextIsolation: true`, no preload
+- **Per-service session partitions (Phase 2)** — `persist:service-${id}` isolates cookies, cache, and storage per service
+- **TOFU certificate handling (Phase 2)** — `session.setCertificateVerifyProc()` with fingerprint persistence, fingerprint-change detection
+- **`--ignore-certificate-errors` removed (Phase 2)** — no more blanket TLS bypass
+- **IPC input validation (Phase 2)** — service ID regex, URL scheme allowlist, bounds shape, hostname parseability, SHA-256 fingerprint format (`electron/validation.ts`)
+- **Append-only change log (Phase 3)** — every SoT mutation wraps its write in a `db.transaction` with `logMutation`, capturing actor / `request_id` / before+after JSON / required `reason`. Device DELETE logs cascaded interface + IP deletions with the shared `request_id` so postmortems can reconstruct what was attached.
+- **Credential storage (Phase 4)** — plaintext enters the Electron main process via the `credential:save` IPC channel, is encrypted immediately by `safeStorage` (DPAPI on Windows, Keychain on macOS, libsecret on Linux), and stored as an opaque blob in `credential.secret_blob`. The renderer has no `get` IPC — plaintext cannot be read back. In-process decryption for outbound service calls happens through `useCredential(callback)` which wraps the callback's errors so they cannot quote the plaintext back through IPC.
+- **`trusted-certs.json` encryption at rest (Phase 4)** — same `safeStorage` envelope. First boot after upgrade auto-migrates any existing plaintext file in place atomically (tmp + fsync + rename).
+- **Atomic encrypted writes (Phase 4)** — `writeEncryptedJson` writes to `<file>.tmp`, fsyncs, then renames. A crash mid-write leaves either the original file or the new one intact, never a truncated mix.
+- **`/api/credentials` local-token gate (Phase 4)** — `hooks.server.ts` rejects any request to `/api/credentials` without a matching `x-wirenest-local-token` header. Main generates a 32-byte random token per boot and exports it to the spawned SvelteKit server's env only. Other local processes on the box cannot reach the endpoint.
+- **UNIQUE constraint + `ON CONFLICT DO UPDATE` on `credential.secret_ref` (Phase 4)** — credential upserts are atomic at the SQL layer; no select-then-write race.
+- **Credential change-log hygiene (Phase 4)** — blob bytes and plaintext never enter `change_log.beforeJson` / `afterJson`. Only projected metadata + `hasSecret: boolean` is written. Validated by test coverage (`credentialStore.test.ts`, `credentialBroker.test.ts`).
+- **IPC handler sender validation** — every `ipcMain.handle` in `electron/main.ts` calls `assertAppChrome(event.sender.id)` before acting; service views have no preload to reach IPC.
+
+### Known trust boundaries (document so future self doesn't re-discover)
+- **A compromised app-chrome renderer can DoS, enumerate, and overwrite credentials — but cannot read plaintext.** The preload exposes `saveCredential`, `hasCredential`, `deleteCredential`, `listCredentials`. No `getCredential`. XSS in a wiki page = "credentials can be overwritten / deleted / enumerated," not "credentials stolen." Single-operator desktop threat model treats app-chrome-compromise as equivalent to app-compromise.
+- **safeStorage blob is only decryptable on the same user+machine+codesign identity.** Exfiltrating the blob buys an attacker nothing without also compromising the OS keychain. Document in onboarding: backups of the SQLite file are useless without migration via re-entry.
+- **Process-memory inspection is out of scope.** V8 interns strings; plaintext cannot be zeroed after decryption. An attacker with debug-level access to the Electron main process has already won.
 
 ### What is NOT implemented
-- **Process isolation** — services load in iframes within a single renderer process. XSS in any service has full access to the app's JS context. → Fixed in Phase 2 (Electron WebContentsView)
-- **`--ignore-certificate-errors` is active** — all TLS verification disabled. → Fixed in Phase 2 (`setCertificateVerifyProc`)
-- **CSP is wide open** — `unsafe-inline`, `unsafe-eval`, wildcard sources. → Fixed in Phase 2 (no iframes)
-- **Database encryption** — DB is unencrypted SQLite. → Fixed in Phase 4 (safeStorage + encrypted columns)
-- **Credential storage** — not implemented. → Fixed in Phase 4 (`safeStorage`)
-- **Session isolation** — iframes share cookie jar. → Fixed in Phase 2 (session partitions)
-- **Audit logging** — not implemented. → Fixed in Phase 4
+- **Database encryption at rest for non-credential tables** — the wiki DB is still plaintext SQLite. Phase 4 only encrypts credentials and trusted-certs. Wiki narrative, device inventory, and change log rows are all plaintext (except the `after_json` for credential mutations, which only ever contains metadata by construction). Full-DB encryption is explicit non-scope for homelab-tier work.
+- **Redaction list for `logMutation`** — currently relies on the credential REST endpoint itself projecting `hasSecret` instead of the blob. If a future caller bypasses the projection (e.g. a raw `db.update(credential)` in a future sync path), the blob bytes could land in `change_log.afterJson` as a base64 string. Mitigation: centralize all credential writes through `upsertCredential`, never write the `credential` table directly from anywhere else. Consider adding a Drizzle trigger or a schema-level redaction hook later.
+- **MCP server credentials in env vars** — MCP still reads service credentials from environment variables at spawn time. Moving MCP credential delivery through the same broker pattern as the renderer is Phase 5+ work. Any process running as the same user can read a spawned process's environment — same threat model as DPAPI but without the key-wrap.
+- **Production-mode HOST binding** — `@sveltejs/adapter-node` defaults `HOST=0.0.0.0` when packaged; that would expose the API to the LAN. Production packaging hasn't landed yet, but when it does, `HOST=127.0.0.1` must be set explicitly before the adapter boots.
+- **Wiki write guardrails** — `wiki.write` requires a `reason` but has no source-validation gate; agents can still write unsourced claims into narrative. See [ARCHITECTURE.md §7.5](ARCHITECTURE.md#75-agent-write-discipline-how-we-stop-hallucination). Tracking for a later phase.
+- **`trusted-certs.json` keyed by hostname, not hostname:port** — two services on the same IP but different ports will collide. Low-priority fix.
+- **`preload.ts` `onCertUntrusted` listener leak** — adds `ipcRenderer.on` with no detach method. Expose a remove function if the listener needs to be swapped.
 
 ### What this means in practice
-Safe to run on a trusted local machine during development. NOT safe to:
-- Store real API tokens (plaintext SQLite, accessible via unauthenticated HTTP)
-- Expose to any network (no auth, TLS disabled)
-- Trust embedded service sessions (no isolation)
+Phase 4 closes the "real API tokens on disk" threat for single-operator homelab use on a trusted machine. Still NOT safe to:
+- Expose the SvelteKit port to any network (no end-user auth; localhost-only + local-token gate is the design — production packaging must set `HOST=127.0.0.1`)
+- Run the MCP server without minding its env vars (they contain plaintext credentials until Phase 5+)
+- Let agents write wiki pages without human review of sources (hallucination gate not yet enforced)
 
 ---
 
@@ -48,13 +67,20 @@ Safe to run on a trusted local machine during development. NOT safe to:
 
 | # | Threat | Likelihood | Impact | Mitigation | Status |
 |---|---|---|---|---|---|
-| 1 | Local malware / infostealer reads DB | HIGH | CRITICAL | Encrypt sensitive columns with `safeStorage` (DPAPI) | NOT IMPLEMENTED |
-| 2 | XSS in embedded service accesses app context | MEDIUM | CRITICAL | Process-isolated WebContentsView, no preload on service views | NOT IMPLEMENTED |
-| 3 | MITM due to disabled TLS verification | MEDIUM | CRITICAL | `setCertificateVerifyProc` with TOFU fingerprinting | NOT IMPLEMENTED |
-| 4 | Compromised service feeds malicious API data | MEDIUM | MEDIUM | Sanitize all API responses, never use `{@html}` with untrusted data | PARTIAL |
-| 5 | npm supply chain compromise | LOW-MEDIUM | CRITICAL | pnpm strict isolation, ignore-scripts, save-exact, audit | DONE |
-| 6 | Lateral movement via stolen credentials | LOW | CRITICAL | Minimum-privilege API tokens, per-credential encryption | NOT IMPLEMENTED |
-| 7 | Malicious Electron update / supply chain | LOW | CRITICAL | Pin Electron version exactly, verify checksums | DONE (when implemented) |
+| 1 | Local malware / infostealer reads DB | HIGH | CRITICAL | Credentials encrypted at rest via `safeStorage` (DPAPI/Keychain/libsecret); blob bytes never leave main | DONE (Phase 4) |
+| 2 | **Other local process hits `/api/credentials`** (curl, malware, hostile browser extension) | HIGH | CRITICAL | Per-boot shared-secret token enforced by `hooks.server.ts` on `/api/credentials`; timing-safe compare | DONE (Phase 4) |
+| 3 | **`change_log` archives plaintext credentials** | HIGH | CRITICAL | Credential writes always project `hasSecret:bool` instead of blob into `before`/`after`; blob bytes never flow into `change_log.afterJson` | DONE (Phase 4 — single upsert path; must stay the sole write path) |
+| 4 | XSS in embedded service accesses app context | MEDIUM | CRITICAL | Process-isolated `WebContentsView`, no preload on service views | DONE (Phase 2) |
+| 5 | MITM due to disabled TLS verification | MEDIUM | CRITICAL | `setCertificateVerifyProc` with TOFU fingerprinting; trusted-certs file encrypted at rest | DONE (Phase 2 + Phase 4) |
+| 6 | Compromised renderer overwrites/deletes/enumerates credentials | MEDIUM | MEDIUM | By design — single-operator threat model treats chrome compromise as app compromise. No `getCredential` in preload so plaintext still cannot be read. | ACCEPTED |
+| 7 | Compromised service feeds malicious API data | MEDIUM | MEDIUM | Sanitize all API responses, never use `{@html}` with untrusted data | PARTIAL |
+| 8 | MCP credentials readable from spawned process environment | MEDIUM | HIGH | Deliver MCP creds via the same broker pattern as the renderer (Phase 5+) instead of env vars | NOT IMPLEMENTED |
+| 9 | Unauthenticated localhost API for non-credential endpoints | MEDIUM | MEDIUM | Same-origin/Sec-Fetch check in `hooks.server.ts` blocks cross-origin mutations; non-credential data is homelab-tier sensitive and acceptable on trusted machine | PARTIAL |
+| 10 | Interrupted-write corrupts trusted-certs.json → TOFU reset | LOW | MEDIUM | Atomic tmp+fsync+rename write; empty/zero-byte file treated as missing rather than throwing on decrypt | DONE (Phase 4) |
+| 11 | Concurrent credential upsert inserts duplicate rows | LOW | MEDIUM | `UNIQUE(secret_ref)` + `ON CONFLICT DO UPDATE` makes upserts atomic at SQL | DONE (Phase 4) |
+| 12 | npm supply chain compromise | LOW-MEDIUM | CRITICAL | pnpm strict isolation, `ignore-scripts`, `save-exact`, audit | DONE |
+| 13 | Lateral movement via stolen credentials | LOW | CRITICAL | Minimum-privilege API tokens per service (operator hygiene); `safeStorage` encryption | PARTIAL |
+| 14 | Malicious Electron update / supply chain | LOW | CRITICAL | Pin Electron version exactly, verify checksums | DONE (when packaging ships) |
 
 ### Real-world precedents
 

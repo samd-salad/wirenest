@@ -12,6 +12,7 @@ import {
 	requireIp,
 	optionalUrl,
 	optionalJsonObject,
+	parseRouteId,
 } from '../validate';
 
 describe('ValidationError', () => {
@@ -228,5 +229,37 @@ describe('optionalJsonObject', () => {
 	it('rejects primitives', () => {
 		expect(() => optionalJsonObject('string', 'obj')).toThrow(ValidationError);
 		expect(() => optionalJsonObject(42, 'obj')).toThrow(ValidationError);
+	});
+});
+
+describe('parseRouteId', () => {
+	it('accepts clean positive integers', () => {
+		expect(parseRouteId('1')).toBe(1);
+		expect(parseRouteId('42')).toBe(42);
+		expect(parseRouteId('1000000')).toBe(1000000);
+	});
+
+	it('rejects decimals, exponents, and negatives', () => {
+		expect(parseRouteId('7.5')).toBeNull();
+		expect(parseRouteId('7e10')).toBeNull();
+		expect(parseRouteId('-5')).toBeNull();
+		expect(parseRouteId('0x10')).toBeNull();
+	});
+
+	it('rejects leading zeros (except "0" itself which is also rejected for being non-positive)', () => {
+		expect(parseRouteId('007')).toBeNull();
+		expect(parseRouteId('0')).toBeNull();
+	});
+
+	it('rejects whitespace, empty, and non-string inputs', () => {
+		expect(parseRouteId(' 7 ')).toBeNull();
+		expect(parseRouteId('')).toBeNull();
+		expect(parseRouteId(undefined)).toBeNull();
+		expect(parseRouteId(null)).toBeNull();
+		expect(parseRouteId(7)).toBeNull();
+	});
+
+	it('rejects values outside the safe-integer range', () => {
+		expect(parseRouteId('9007199254740993')).toBeNull();
 	});
 });

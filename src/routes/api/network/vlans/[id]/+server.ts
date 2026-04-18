@@ -4,14 +4,15 @@ import * as schema from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import type { RequestHandler } from './$types';
 import {
-	optionalString, optionalEnum, optionalIp, ValidationError,
+	optionalString, optionalEnum, optionalIp, parseRouteId, ValidationError,
 } from '$lib/server/validate';
+import { logMutation, newRequestId } from '$lib/server/db/changeLog';
 
 const DHCP_POLICIES = ['known-clients-only', 'allow-unknown'] as const;
 
 export const PUT: RequestHandler = async ({ params, request }) => {
-	const id = parseInt(params.id, 10);
-	if (isNaN(id)) return json({ error: 'Invalid id' }, { status: 400 });
+	const id = parseRouteId(params.id);
+	if (id == null) return json({ error: 'Invalid id' }, { status: 400 });
 
 	try {
 		const body = await request.json();
@@ -30,9 +31,26 @@ export const PUT: RequestHandler = async ({ params, request }) => {
 		if ('color' in body) updateData.color = optionalString(body.color, 'color', 20);
 		if ('fwInterface' in body) updateData.fwInterface = optionalString(body.fwInterface, 'fwInterface', 50);
 
-		db.update(schema.vlan).set(updateData).where(eq(schema.vlan.id, id)).run();
+		const reason = typeof body.reason === 'string' && body.reason.trim()
+			? body.reason.trim()
+			: 'user edit via UI';
+		const requestId = newRequestId();
 
-		const updated = db.select().from(schema.vlan).where(eq(schema.vlan.id, id)).get();
+		const updated = db.transaction((tx) => {
+			tx.update(schema.vlan).set(updateData).where(eq(schema.vlan.id, id)).run();
+			const after = tx.select().from(schema.vlan).where(eq(schema.vlan.id, id)).get();
+			logMutation(tx, {
+				actor: 'user:ui',
+				objectType: 'vlan',
+				objectId: id,
+				action: 'update',
+				before: existing,
+				after,
+				reason,
+				requestId,
+			});
+			return after;
+		});
 		return json(updated);
 	} catch (err) {
 		if (err instanceof ValidationError) {

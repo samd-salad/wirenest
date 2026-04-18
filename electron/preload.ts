@@ -71,4 +71,33 @@ contextBridge.exposeInMainWorld('wirenest', {
 	// Resource usage
 	getResourceUsage: (): Promise<{ heapUsedMB: number; rssMB: number }> =>
 		ipcRenderer.invoke('app:resource-usage'),
+
+	// Credentials (Phase 4)
+	// Plaintext enters main via `saveCredential` and is encrypted by
+	// safeStorage before reaching disk. The renderer can never *read*
+	// a plaintext secret back — there is no `getCredential` here by
+	// design.
+	saveCredential: (
+		meta: {
+			name: string;
+			type: 'api_token' | 'username_password' | 'ssh_key' | 'certificate' | 'community_string';
+			serviceId?: number | null;
+			dataSourceId?: number | null;
+			username?: string | null;
+			notes?: string | null;
+			secretRef?: string;
+		},
+		plaintext: string,
+		reason?: string,
+	): Promise<unknown> =>
+		ipcRenderer.invoke('credential:save', meta, plaintext, reason),
+
+	hasCredential: (secretRef: string): Promise<boolean> =>
+		ipcRenderer.invoke('credential:has', secretRef),
+
+	deleteCredential: (secretRef: string, reason?: string): Promise<boolean> =>
+		ipcRenderer.invoke('credential:delete', secretRef, reason),
+
+	listCredentials: (): Promise<unknown[]> =>
+		ipcRenderer.invoke('credential:list'),
 });
