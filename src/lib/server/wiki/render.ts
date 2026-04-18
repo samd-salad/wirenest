@@ -66,6 +66,13 @@ export interface RenderOptions {
 	staleness?: Staleness;
 	/** If non-empty, a "Referenced by" block is appended. */
 	backlinks?: BacklinkEntry[];
+	/**
+	 * Slug → full-page-path map (e.g. `"network-architecture"` → `"pages/concepts/network-architecture.md"`).
+	 * Built by `compile()` from the page tree. Enables `[[wikilink]]`
+	 * resolution to produce a path the UI can actually load, regardless
+	 * of what subdirectory the target page lives in.
+	 */
+	pagesBySlug?: Map<string, string>;
 }
 
 /**
@@ -85,6 +92,7 @@ export function render(
 		options.aliasMap ?? new Map(),
 		options.apiCache ?? new Map(),
 		options.selfPath ?? null,
+		options.pagesBySlug ?? new Map(),
 	);
 	const rawHtml = markdown.parse(resolved, { async: false }) as string;
 	const withStaleness = prependStalenessBanner(rawHtml, options.staleness);
@@ -145,6 +153,7 @@ export function processBody(
 	aliasMap: AliasMap,
 	apiCache: ApiCache,
 	selfPath: string | null,
+	pagesBySlug: Map<string, string> = new Map(),
 ): { body: string; warnings: RenderWarning[] } {
 	const segments: string[] = [];
 	const mask = (m: string) => {
@@ -160,7 +169,7 @@ export function processBody(
 
 	// Phase 2: [[wikilinks]] → anchor, then mask.
 	text = text.replace(WIKILINK_PATTERN, (_m, slug: string, display?: string) => {
-		return mask(resolveWikilink(slug.trim(), display?.trim()));
+		return mask(resolveWikilink(slug.trim(), display?.trim(), pagesBySlug, selfPath));
 	});
 
 	// Phase 3: @sot / @api markers → anchor or broken-span, then mask.
@@ -170,7 +179,7 @@ export function processBody(
 		const resolved =
 			kind === 'api'
 				? resolveApiMarker(trimmed, apiCache)
-				: resolveSotMarker(trimmed, snapshot);
+				: resolveSotMarker(trimmed, snapshot, selfPath);
 		if (resolved.warning) warnings.push(resolved.warning);
 		return mask(resolved.html);
 	});
@@ -184,10 +193,45 @@ export function processBody(
 	return { body: text, warnings };
 }
 
-function resolveWikilink(slug: string, display?: string): string {
-	const href = slug.endsWith('.md') ? slug : `${slug}.md`;
+/**
+ * Resolve a [[wikilink]] target to a full path the UI can load. We try:
+ *   1. `pagesBySlug.get(slug)` — the authoritative map built by compile,
+ *      covers every page regardless of which subdir it lives in.
+ *   2. If `slug` already looks like a full `pages/...` path, pass through.
+ *   3. Fall back to `pages/{slug}.md` — works for pages at the pages/ root.
+ * Self-links render as plain text (no anchor) so the click doesn't become
+ * a visible no-op activation of the already-open tab.
+ */
+function resolveWikilink(
+	slug: string,
+	display: string | undefined,
+	pagesBySlug: Map<string, string>,
+	selfPath: string | null,
+): string {
 	const label = (display ?? slug).trim();
-	return `<a href="${htmlEscape(href)}" class="wiki-link">${htmlEscape(label)}</a>`;
+	// Strip optional `#anchor` off the slug before lookup so [[vlan-20#dhcp]]
+	// resolves the same page. The anchor is kept on the href for in-page nav.
+	const hashIdx = slug.indexOf('#');
+	const bareSlug = hashIdx === -1 ? slug : slug.slice(0, hashIdx);
+	const anchor = hashIdx === -1 ? '' : slug.slice(hashIdx);
+
+	const mapped = pagesBySlug.get(bareSlug);
+	let href: string;
+	if (mapped) {
+		href = mapped;
+	} else if (bareSlug.startsWith('pages/')) {
+		href = bareSlug.endsWith('.md') ? bareSlug : `${bareSlug}.md`;
+	} else {
+		href = bareSlug.endsWith('.md') ? `pages/${bareSlug}` : `pages/${bareSlug}.md`;
+	}
+
+	if (selfPath && href === selfPath) {
+		// Self-link — render as a styled span instead of an anchor so the
+		// click doesn't re-activate the already-open tab.
+		return `<span class="wiki-link wiki-self-link">${htmlEscape(label)}</span>`;
+	}
+
+	return `<a href="${htmlEscape(href + anchor)}" class="wiki-link">${htmlEscape(label)}</a>`;
 }
 
 interface ResolvedMarker {
@@ -195,7 +239,11 @@ interface ResolvedMarker {
 	warning?: RenderWarning;
 }
 
-function resolveSotMarker(expr: string, snapshot: DbSnapshot): ResolvedMarker {
+function resolveSotMarker(
+	expr: string,
+	snapshot: DbSnapshot,
+	selfPath: string | null,
+): ResolvedMarker {
 	const countMatch = expr.match(COUNT_PATTERN);
 	if (countMatch) return resolveCount(countMatch[1], snapshot, expr);
 
@@ -216,7 +264,7 @@ function resolveSotMarker(expr: string, snapshot: DbSnapshot): ResolvedMarker {
 			`unknown entity type "${entityType}"`,
 		);
 	}
-	return resolveEntityField(entityType, parseInt(idStr, 10), field, snapshot, expr);
+	return resolveEntityField(entityType, parseInt(idStr, 10), field, snapshot, expr, selfPath);
 }
 
 function resolveEntityField(
@@ -225,6 +273,7 @@ function resolveEntityField(
 	field: string,
 	snapshot: DbSnapshot,
 	expr: string,
+	selfPath: string | null,
 ): ResolvedMarker {
 	const entity =
 		entityType === 'vlan' ? snapshot.vlans.get(id) : snapshot.devices.get(id);
@@ -246,10 +295,21 @@ function resolveEntityField(
 			`${entityType}/${id} has no field "${field}"`,
 		);
 	}
+	// Full path so the UI can fetch/load without guessing at the subdir.
 	const href =
 		entityType === 'vlan'
-			? `vlans/vlan-${id}.md`
-			: `devices/${slugify(entity.name)}.md`;
+			? `pages/vlans/vlan-${id}.md`
+			: `pages/devices/${slugify(entity.name)}.md`;
+
+	// Self-reference: don't wrap in an anchor. The click would just dedupe
+	// onto the already-open tab and look broken to the user.
+	if (selfPath && href === selfPath) {
+		const marker = `@sot:${expr}`;
+		return {
+			html: `<span class="wiki-sot-value wiki-sot-self" data-marker="${htmlEscape(marker)}">${htmlEscape(String(value))}</span>`,
+		};
+	}
+
 	return { html: anchor(href, String(value), `@sot:${expr}`) };
 }
 

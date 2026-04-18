@@ -45,6 +45,13 @@ export interface CompileResult {
 	backlinks: Map<string, BacklinkEntry[]>;
 	staleness: Map<string, Staleness>;
 	suggestedIndex: string;
+	/**
+	 * Slug → full page path (e.g. `"network-architecture"` →
+	 * `"pages/concepts/network-architecture.md"`). Used by the renderer
+	 * to resolve `[[wikilinks]]` regardless of where the target page
+	 * lives in the tree.
+	 */
+	pagesBySlug: Map<string, string>;
 }
 
 export interface CompileOptions {
@@ -147,7 +154,15 @@ export async function compile(
 	const suggestedIndex = renderSuggestedIndex(indexPages);
 	warnings.push(...detectDeadWikilinks(pagesWithBody));
 
-	return { aliasMap: map, collisions, warnings, pages, backlinks, staleness, suggestedIndex };
+	// Build the slug → full path map so the renderer can resolve
+	// [[wikilinks]] against the actual tree (pages can live in any
+	// subdirectory after the 2026-04 reorg).
+	const pagesBySlug = new Map<string, string>();
+	for (const p of pages) {
+		pagesBySlug.set(pathToSlug(p.path), p.path);
+	}
+
+	return { aliasMap: map, collisions, warnings, pages, backlinks, staleness, suggestedIndex, pagesBySlug };
 }
 
 async function listMarkdownFiles(dir: string): Promise<string[]> {

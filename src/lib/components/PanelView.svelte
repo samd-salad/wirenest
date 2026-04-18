@@ -786,7 +786,14 @@
 
 	.wiki-content :global(a) { color: var(--color-accent); text-decoration: none; }
 	.wiki-content :global(a:hover) { text-decoration: underline; }
-	.wiki-content :global(a.wikilink) { color: var(--color-accent); border-bottom: 1px dashed var(--color-accent); }
+	.wiki-content :global(a.wiki-link) { color: var(--color-accent); border-bottom: 1px dashed var(--color-accent); }
+	.wiki-content :global(a.wiki-alias) { color: var(--color-accent); border-bottom: 1px dotted var(--color-accent); }
+	/* @sot values rendered on their own page — no link, since the click would
+	   just re-activate the already-open tab. Styled as emphasized text so the
+	   user still sees the live DB value visually distinct from prose. */
+	.wiki-content :global(span.wiki-sot-self),
+	.wiki-content :global(span.wiki-self-link) { color: var(--color-accent); font-weight: 500; cursor: default; }
+	.wiki-content :global(span.wiki-broken-marker) { color: var(--color-danger, #b42318); background: var(--color-bg-elevated); padding: 0 0.25rem; border-radius: 3px; font-size: 0.85em; }
 
 	.wiki-content :global(code) { background: var(--color-bg-elevated); padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.85em; font-family: inherit; }
 

@@ -81,8 +81,8 @@ describe('smoke: vlans/vlan-20.md renders against seed snapshot', () => {
 
 	it('emits clickable links back to the vlan page for DB-sourced values', () => {
 		const { html } = render(raw, seedSnapshot());
-		expect(html).toContain('href="vlans/vlan-20.md"');
-		expect(html).toContain('href="vlans/vlan-25.md"');
+		expect(html).toContain('href="pages/vlans/vlan-20.md"');
+		expect(html).toContain('href="pages/vlans/vlan-25.md"');
 	});
 
 	it('aggregate count() marker renders WITHOUT an anchor', () => {

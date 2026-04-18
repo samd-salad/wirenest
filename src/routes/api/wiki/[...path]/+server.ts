@@ -48,6 +48,7 @@ export const GET: RequestHandler = async ({ params, url }) => {
 		const compiled = await compile(WIKI_DIR, snapshot);
 		const { html, frontmatter, warnings } = render(content, snapshot, {
 			aliasMap: compiled.aliasMap,
+			pagesBySlug: compiled.pagesBySlug,
 			selfPath: reqPath,
 			staleness: compiled.staleness.get(reqPath),
 			backlinks: compiled.backlinks.get(reqPath) ?? [],

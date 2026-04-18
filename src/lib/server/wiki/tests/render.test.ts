@@ -95,7 +95,7 @@ describe('resolveMarkers — @sot entity fields', () => {
 			null,
 		);
 		expect(warnings).toEqual([]);
-		expect(body).toContain('href="vlans/vlan-20.md"');
+		expect(body).toContain('href="pages/vlans/vlan-20.md"');
 		expect(body).toContain('10.0.20.0/24');
 		expect(body).toContain('data-marker="@sot:vlan/20.subnet"');
 	});
@@ -108,7 +108,7 @@ describe('resolveMarkers — @sot entity fields', () => {
 			emptyApiCache(),
 			null,
 		);
-		expect(body).toContain('href="devices/pve01.md"');
+		expect(body).toContain('href="pages/devices/pve01.md"');
 		expect(body).toContain('pve01.lan');
 	});
 
@@ -252,7 +252,7 @@ describe('resolveMarkers — code block skipping', () => {
 		const { body, warnings } = processBody(input, snap, emptyAliasMap(), emptyApiCache(), null);
 		expect(warnings).toEqual([]);
 		expect(body).toContain('<!-- @sot:vlan/20.subnet -->');
-		expect(body).not.toContain('href="vlans/vlan-20.md"');
+		expect(body).not.toContain('href="pages/vlans/vlan-20.md"');
 	});
 
 	it('leaves markers inside inline code literal', () => {
@@ -266,7 +266,7 @@ describe('resolveMarkers — code block skipping', () => {
 			'Use `<!-- @sot:... -->` like this: <!-- @sot:vlan/20.subnet -->.';
 		const { body } = processBody(input, snap, emptyAliasMap(), emptyApiCache(), null);
 		expect(body).toContain('`<!-- @sot:... -->`');
-		expect(body).toContain('href="vlans/vlan-20.md"');
+		expect(body).toContain('href="pages/vlans/vlan-20.md"');
 	});
 });
 
@@ -289,7 +289,7 @@ describe('render — end to end', () => {
 		expect(result.html).toContain('10.0.20.0/24');
 		expect(result.html).toContain('10.0.20.1');
 		expect(result.html).toContain('>1<');
-		expect(result.html).toContain('href="vlans/vlan-20.md"');
+		expect(result.html).toContain('href="pages/vlans/vlan-20.md"');
 	});
 
 	it('sanitizes disallowed tags from the rendered HTML', () => {
@@ -327,29 +327,29 @@ describe('render — [[wikilinks]]', () => {
 	it('resolves a bare [[slug]] to an anchor with .md href', () => {
 		const raw = 'See [[devices/pve01]] for details.';
 		const { html } = render(raw, snap);
-		expect(html).toContain('href="devices/pve01.md"');
+		expect(html).toContain('href="pages/devices/pve01.md"');
 		expect(html).toContain('>devices/pve01</a>');
 	});
 
 	it('uses the display text when [[slug|display]] is used', () => {
 		const raw = 'See [[devices/pve01|the Proxmox host]] for details.';
 		const { html } = render(raw, snap);
-		expect(html).toContain('href="devices/pve01.md"');
+		expect(html).toContain('href="pages/devices/pve01.md"');
 		expect(html).toContain('>the Proxmox host</a>');
 	});
 
 	it('preserves the .md extension when already present', () => {
 		const raw = '[[foo.md]]';
 		const { html } = render(raw, snap);
-		expect(html).toContain('href="foo.md"');
-		expect(html).not.toContain('href="foo.md.md"');
+		expect(html).toContain('href="pages/foo.md"');
+		expect(html).not.toContain('href="pages/foo.md.md"');
 	});
 
 	it('leaves [[wikilinks]] inside code blocks literal', () => {
 		const raw = '```\n[[devices/pve01]]\n```\n';
 		const { html } = render(raw, snap);
 		expect(html).toContain('[[devices/pve01]]');
-		expect(html).not.toContain('href="devices/pve01.md"');
+		expect(html).not.toContain('href="pages/devices/pve01.md"');
 	});
 });
 
@@ -365,9 +365,9 @@ describe('render — alias auto-linking', () => {
 		const { html } = render(
 			raw,
 			snap,
-			withAliases([['pve01', 'devices/pve01.md']]),
+			withAliases([['pve01', 'pages/devices/pve01.md']]),
 		);
-		expect(html).toContain('href="devices/pve01.md"');
+		expect(html).toContain('href="pages/devices/pve01.md"');
 		expect(html).toContain('class="wiki-alias"');
 	});
 
