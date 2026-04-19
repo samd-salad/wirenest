@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { fetchServerCert, exportServerCert, installCaCert, isCertTrusted, type CertInfo } from '$lib/services/certs';
+	import { getTrustedCertForHost, isCertApiAvailable, type CertInfo } from '$lib/services/certs';
 	import { saveCredential, testConnection, hasCredential, type CredentialType } from '$lib/services/credentials';
 	import { services } from '$lib/stores/services';
 	import { getIcon } from './icons';
@@ -22,9 +22,12 @@
 	// Wizard steps
 	let step = $state<'welcome' | 'certs' | 'connect' | 'done'>('welcome');
 
-	// Cert step state
+	// Cert step state — we can only tell the user which hosts have
+	// *already* been trusted. Cert fingerprints for un-seen services
+	// aren't fetchable from the renderer; the Electron main process
+	// prompts to trust when the service tab is first opened.
 	let httpsServices = $derived($services.filter(s => s.url.startsWith('https')));
-	let certResults = $state<Map<string, { info?: CertInfo; error?: string; trusted?: boolean; installing?: boolean; installed?: boolean }>>(new Map());
+	let certResults = $state<Map<string, { trusted: boolean; cert?: CertInfo | null; error?: string }>>(new Map());
 	let scanningCerts = $state(false);
 
 	// Connect step state
@@ -33,18 +36,24 @@
 
 	async function scanCerts() {
 		scanningCerts = true;
-		const results = new Map<string, { info?: CertInfo; error?: string; trusted?: boolean }>();
+		const results = new Map<string, { trusted: boolean; cert?: CertInfo | null; error?: string }>();
+
+		if (!isCertApiAvailable()) {
+			for (const svc of httpsServices) {
+				results.set(svc.id, { trusted: false, error: 'desktop app only' });
+			}
+			certResults = results;
+			scanningCerts = false;
+			return;
+		}
 
 		for (const svc of httpsServices) {
 			try {
-				const url = new URL(svc.url);
-				const host = url.hostname;
-				const port = parseInt(url.port) || 443;
-				const info = await fetchServerCert(host, port);
-				const trusted = info.fingerprint ? await isCertTrusted(info.fingerprint) : false;
-				results.set(svc.id, { info, trusted });
+				const hostname = new URL(svc.url).hostname;
+				const cert = await getTrustedCertForHost(hostname);
+				results.set(svc.id, { trusted: cert != null, cert });
 			} catch (e) {
-				results.set(svc.id, { error: String(e) });
+				results.set(svc.id, { trusted: false, error: String(e) });
 			}
 		}
 
@@ -52,41 +61,11 @@
 		scanningCerts = false;
 	}
 
-	async function installCert(serviceId: string) {
-		const result = certResults.get(serviceId);
-		if (!result?.info) return;
-
-		const svc = $services.find(s => s.id === serviceId);
-		if (!svc) return;
-
-		const updated = { ...result, installing: true };
-		certResults = new Map(certResults).set(serviceId, updated);
-
-		try {
-			const url = new URL(svc.url);
-			const host = url.hostname;
-			const port = parseInt(url.port) || 443;
-
-			// Export cert to a temp file
-			// Filename only — Rust backend resolves to safe directory
-			const safeHost = host.replace(/[^a-zA-Z0-9.-]/g, '_');
-			const certPath = `${safeHost}-${port}.pem`;
-			await exportServerCert(host, port, certPath);
-
-			// Install to trust store (will prompt UAC)
-			await installCaCert(certPath);
-
-			certResults = new Map(certResults).set(serviceId, { ...result, installing: false, installed: true, trusted: true });
-		} catch (e) {
-			certResults = new Map(certResults).set(serviceId, { ...result, installing: false, error: String(e) });
-		}
-	}
-
 	async function initConnectStep() {
 		const states = new Map<string, { hasStored: boolean; credType: CredentialType; credValue: string; testing: boolean; saving: boolean; result: string; error: boolean }>();
 		for (const svc of connectServices) {
 			let hasStored = false;
-			try { hasStored = await hasCredential(svc.id); } catch {}
+			try { hasStored = await hasCredential(svc.id); } catch { /* renderer outside Electron — treat as none stored */ }
 			states.set(svc.id, { hasStored, credType: 'api_token', credValue: '', testing: false, saving: false, result: '', error: false });
 		}
 		credStates = states;
@@ -154,21 +133,21 @@
 							<span class="step-num">1</span>
 							<div>
 								<strong>Trust certificates</strong>
-								<p>Install your services' certificates so webviews load without errors.</p>
+								<p>Review which services already have a trusted cert; the rest prompt you on first load.</p>
 							</div>
 						</div>
 						<div class="step-item">
 							<span class="step-num">2</span>
 							<div>
 								<strong>Connect APIs</strong>
-								<p>Add credentials for each service to enable data sync and management.</p>
+								<p>Add credentials for each service — encrypted with <code>safeStorage</code>, never on disk in plaintext.</p>
 							</div>
 						</div>
 						<div class="step-item">
 							<span class="step-num">3</span>
 							<div>
 								<strong>Start using WireNest</strong>
-								<p>Your services will load in tabs and auto-discover your devices.</p>
+								<p>Your services load in tabs and show up beside their wiki pages.</p>
 							</div>
 						</div>
 					</div>
@@ -188,10 +167,12 @@
 					<h3>Certificate Trust</h3>
 					{#if httpsServices.length === 0}
 						<p>No HTTPS services found. You can skip this step.</p>
+					{:else if !isCertApiAvailable()}
+						<p>Certificate trust is managed by the Electron desktop app. Open WireNest through the desktop shell to see the trust state for your services.</p>
 					{:else}
-						<p>Scanning your HTTPS services for self-signed certificates...</p>
+						<p>WireNest uses Trust-on-First-Use: when you open an HTTPS service with a self-signed cert, you'll be prompted to inspect and trust it. Services that have already been trusted are marked below.</p>
 						{#if scanningCerts}
-							<div class="scanning">Scanning {httpsServices.length} services...</div>
+							<div class="scanning">Checking {httpsServices.length} services...</div>
 						{:else}
 							<div class="cert-list">
 								{#each httpsServices as svc (svc.id)}
@@ -202,21 +183,16 @@
 											{svc.name}
 										</span>
 										{#if !result}
-											<span class="cert-status muted">Scanning...</span>
+											<span class="cert-status muted">Checking...</span>
 										{:else if result.error}
 											<span class="cert-status error">{result.error}</span>
-										{:else if result.trusted || result.installed}
+										{:else if result.trusted}
 											<span class="cert-status trusted">Trusted</span>
-										{:else if result.info?.self_signed}
-											<div class="cert-action">
-												<span class="cert-status warning">Self-signed</span>
-												<span class="cert-fingerprint">{result.info.fingerprint?.slice(0, 16)}...</span>
-												<button class="btn btn-small" disabled={result.installing} onclick={() => installCert(svc.id)}>
-													{result.installing ? 'Installing...' : 'Trust this cert'}
-												</button>
-											</div>
+											{#if result.cert?.fingerprint}
+												<span class="cert-fingerprint">{result.cert.fingerprint.slice(0, 23)}...</span>
+											{/if}
 										{:else}
-											<span class="cert-status trusted">Trusted (CA-signed)</span>
+											<span class="cert-status warning">Not yet trusted — open the service to trust</span>
 										{/if}
 									</div>
 								{/each}
@@ -234,7 +210,7 @@
 			{:else if step === 'connect'}
 				<div class="wizard-section">
 					<h3>Connect Services</h3>
-					<p>Add API credentials for your services. Each credential is encrypted and stored in your OS keychain.</p>
+					<p>Add API credentials for your services. Each credential is encrypted with <code>safeStorage</code> and stored in your OS keychain.</p>
 					<div class="connect-list">
 						{#each connectServices as svc (svc.id)}
 							{@const state = credStates.get(svc.id)}
@@ -245,7 +221,7 @@
 										{svc.name}
 									</span>
 									{#if state?.hasStored}
-										<span class="cert-status trusted">Connected</span>
+										<span class="cert-status trusted">Saved</span>
 									{/if}
 								</div>
 								{#if state}
@@ -259,15 +235,15 @@
 										<div class="connect-form">
 											<select class="form-input" bind:value={state.credType} onchange={() => credStates = new Map(credStates)}>
 												<option value="api_token">API Token (Bearer)</option>
-												<option value="proxmox_token">Proxmox API Token</option>
-												<option value="session_password">Password (Session)</option>
-												<option value="snmp_community">SNMP Community</option>
-												<option value="basic_auth">Basic Auth</option>
+												<option value="username_password">Username + Password</option>
+												<option value="ssh_key">SSH Key</option>
+												<option value="certificate">Certificate</option>
+												<option value="community_string">SNMP Community</option>
 											</select>
 											<input
 												type="password"
 												class="form-input"
-												placeholder="Paste token or password..."
+												placeholder="Paste token, key, or password..."
 												bind:value={state.credValue}
 												onchange={() => credStates = new Map(credStates)}
 											/>
@@ -296,7 +272,7 @@
 					<div class="done-icon">&#10003;</div>
 					<h3>You're all set</h3>
 					<p>Your services are configured. Click a service in the sidebar to open it in a tab.</p>
-					<p class="hint">You can re-run this wizard anytime from Settings > Setup Wizard.</p>
+					<p class="hint">You can re-run this wizard anytime from Settings &gt; Setup Wizard.</p>
 				</div>
 				<div class="wizard-actions">
 					<button class="btn btn-primary" onclick={onClose}>Start Using WireNest</button>
@@ -392,7 +368,6 @@
 	.cert-status.error { color: var(--color-danger); font-weight: 400; font-size: 0.75rem; }
 	.cert-status.muted { color: var(--color-text-muted); }
 
-	.cert-action { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 	.cert-fingerprint { font-size: 0.7rem; color: var(--color-text-muted); font-family: inherit; }
 
 	.connect-header { display: flex; align-items: center; justify-content: space-between; }

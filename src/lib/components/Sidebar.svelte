@@ -45,11 +45,10 @@
 
 	const credentialTypes: { value: CredentialType; label: string }[] = [
 		{ value: 'api_token', label: 'API Token (Bearer)' },
-		{ value: 'proxmox_token', label: 'Proxmox API Token' },
-		{ value: 'session_password', label: 'Password (Session)' },
-		{ value: 'snmp_community', label: 'SNMP Community String' },
-		{ value: 'snmpv3', label: 'SNMPv3 Credentials' },
-		{ value: 'basic_auth', label: 'Basic Auth (user:pass)' },
+		{ value: 'username_password', label: 'Username + Password' },
+		{ value: 'ssh_key', label: 'SSH Key' },
+		{ value: 'certificate', label: 'Certificate' },
+		{ value: 'community_string', label: 'SNMP Community String' },
 	];
 
 	// --- Drag-to-reorder state (services) ---

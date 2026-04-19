@@ -77,14 +77,13 @@
 	});
 
 	function markdownToHtml(md: string): string {
-		// Strip YAML frontmatter
+		// Client-side fallback renderer — only runs when the server's
+		// render failed and we're displaying raw markdown. The server
+		// holds the authoritative slug → full-path map, so we can't
+		// resolve [[wikilinks]] accurately here. Leave them as visible
+		// literals so the user sees "something is wrong" instead of a
+		// click that silently 404s.
 		let content = md.replace(/^---[\s\S]*?---\n*/m, '');
-		// Convert [[wikilinks]] to navigable wiki links
-		// e.g. [[proxmox-cluster-setup]] → [proxmox-cluster-setup](wiki:pages/proxmox-cluster-setup.md)
-		content = content.replace(/\[\[([^\]]+)\]\]/g, (_m, name) =>
-			`[${name}](wiki:pages/${name}.md)`
-		);
-		// Convert -- to em dash (before marked processes it)
 		content = content.replace(/ -- /g, ' — ');
 		return marked.parse(content) as string;
 	}

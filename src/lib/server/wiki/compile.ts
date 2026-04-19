@@ -155,11 +155,33 @@ export async function compile(
 	warnings.push(...detectDeadWikilinks(pagesWithBody));
 
 	// Build the slug → full path map so the renderer can resolve
-	// [[wikilinks]] against the actual tree (pages can live in any
-	// subdirectory after the 2026-04 reorg).
+	// [[wikilinks]] against the actual tree. Two keys per page:
+	//   1. Full slug (e.g. `runbooks/pfsense-firewall-rules`) — always unique.
+	//   2. Basename (e.g. `pfsense-firewall-rules`) — for the common case
+	//      where users write `[[pfsense-firewall-rules]]` instead of the
+	//      full subpath. On basename collision (two pages with the same
+	//      filename in different directories), the basename entry is
+	//      dropped and the user must disambiguate with the full subpath —
+	//      the dead-wikilink warning will point at it.
 	const pagesBySlug = new Map<string, string>();
+	const basenameHits = new Map<string, string[]>();
 	for (const p of pages) {
-		pagesBySlug.set(pathToSlug(p.path), p.path);
+		const fullSlug = pathToSlug(p.path);
+		pagesBySlug.set(fullSlug, p.path);
+		const base = fullSlug.split('/').pop() ?? fullSlug;
+		if (base !== fullSlug) {
+			const list = basenameHits.get(base) ?? [];
+			list.push(p.path);
+			basenameHits.set(base, list);
+		}
+	}
+	for (const [base, paths] of basenameHits) {
+		if (paths.length === 1 && !pagesBySlug.has(base)) {
+			pagesBySlug.set(base, paths[0]);
+		}
+		// Collisions fall through — a future feature could expose them as
+		// a compile warning ("ambiguous basename"), but today the
+		// dead-wikilink warning covers the symptom.
 	}
 
 	return { aliasMap: map, collisions, warnings, pages, backlinks, staleness, suggestedIndex, pagesBySlug };
@@ -267,7 +289,24 @@ async function readAndValidate(
 function detectDeadWikilinks(
 	pagesWithBody: Array<{ path: string; body: string; frontmatter: TypedFrontmatter }>,
 ): CompileWarning[] {
-	const knownSlugs = new Set(pagesWithBody.map((p) => pathToSlug(p.path)));
+	// Mirror the resolution rules in `resolveWikilink`: a wikilink is
+	// "alive" if it matches either the full slug or an unambiguous
+	// basename. Otherwise users get spurious dead-link warnings for
+	// perfectly valid short-form wikilinks.
+	const knownSlugs = new Set<string>();
+	const basenameCounts = new Map<string, number>();
+	for (const p of pagesWithBody) {
+		const fullSlug = pathToSlug(p.path);
+		knownSlugs.add(fullSlug);
+		const base = fullSlug.split('/').pop() ?? fullSlug;
+		if (base !== fullSlug) {
+			basenameCounts.set(base, (basenameCounts.get(base) ?? 0) + 1);
+		}
+	}
+	for (const [base, count] of basenameCounts) {
+		if (count === 1 && !knownSlugs.has(base)) knownSlugs.add(base);
+	}
+
 	const out: CompileWarning[] = [];
 	for (const p of pagesWithBody) {
 		const seen = new Set<string>();
@@ -291,9 +330,25 @@ function computeBacklinks(
 	pagesWithBody: Array<{ path: string; body: string; frontmatter: TypedFrontmatter }>,
 	aliasMap: AliasMap,
 ): Map<string, BacklinkEntry[]> {
+	// Two-level slug lookup matching the renderer: full slug first, then
+	// unambiguous basename. Keeps backlinks consistent with what
+	// `resolveWikilink` actually renders.
 	const pageBySlug = new Map<string, { path: string; title: string }>();
+	const basenameCounts = new Map<string, number>();
 	for (const p of pagesWithBody) {
-		pageBySlug.set(pathToSlug(p.path), { path: p.path, title: p.frontmatter.title });
+		const fullSlug = pathToSlug(p.path);
+		pageBySlug.set(fullSlug, { path: p.path, title: p.frontmatter.title });
+		const base = fullSlug.split('/').pop() ?? fullSlug;
+		if (base !== fullSlug) {
+			basenameCounts.set(base, (basenameCounts.get(base) ?? 0) + 1);
+		}
+	}
+	for (const p of pagesWithBody) {
+		const fullSlug = pathToSlug(p.path);
+		const base = fullSlug.split('/').pop() ?? fullSlug;
+		if (base !== fullSlug && basenameCounts.get(base) === 1 && !pageBySlug.has(base)) {
+			pageBySlug.set(base, { path: p.path, title: p.frontmatter.title });
+		}
 	}
 
 	const out = new Map<string, BacklinkEntry[]>();

@@ -4,8 +4,8 @@ slug: network-architecture
 type: concept
 status: current
 created: 2026-04-12
-updated: 2026-04-17
-last_verified: 2026-04-17
+updated: 2026-04-18
+last_verified: 2026-04-18
 confidence: high
 sources:
   - raw/network-overview.md
@@ -17,7 +17,7 @@ related:
   - pages/concepts/dns-architecture.md
 aliases:
   - network-architecture
-tags: [network, topology, vlans, wifi, switch, firewall]
+tags: [network, topology, vlans, wifi, switch, firewall, dmz]
 ---
 
 # Network Architecture
@@ -65,6 +65,7 @@ VLAN ID = third octet (VLAN 10 = 10.0.10.0/24). All subnets /24.
 | 40 | IoT | 10.0.40.0/24 | Smart home devices (WiFi) |
 | 50 | Guest | 10.0.50.0/24 | Visitors (WiFi) |
 | 60 | WireGuard | 10.0.60.0/24 | VPN (virtual, pfSense only) |
+| 70 | DMZ | 10.0.70.0/24 | Publicly exposed services (Minecraft today; NPM planned). Default-deny to every internal VLAN. See [[vlan-70]]. |
 
 ## Switch Port Assignments (Cisco SG200-26P)
 
@@ -72,7 +73,7 @@ See WireNest DB for the authoritative port map. Snapshot as of 2026-04-12:
 
 | Port | PoE | Device | VLANs |
 |------|-----|--------|-------|
-| gi1 | Y | Stormwall (pfSense) | Trunk: 10,20,25,30,40,50 tagged. VLAN 1 excluded. |
+| gi1 | Y | Stormwall (pfSense) | Trunk: 10,20,25,30,40,50,70 tagged. VLAN 1 excluded. |
 | gi3 | Y | Pi 3B+ (Pi-hole) | Access: VLAN 10 untagged |
 | gi4 | Y | Pi 4 (future Pi-hole) | Access: VLAN 10 untagged |
 | gi5 | Y | Pi 5 (Docker) | Access: VLAN 30 untagged |

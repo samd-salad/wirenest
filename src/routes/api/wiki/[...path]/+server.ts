@@ -82,6 +82,19 @@ export const PUT: RequestHandler = async ({ params, request }) => {
 		: 'user edit via UI';
 
 	if (body.content !== undefined) {
+		// Skip the full write+compile+commit pipeline when content is
+		// byte-identical to what's on disk. Otherwise the index
+		// regeneration would touch wiki/index.md every noop write,
+		// producing empty cosmetic git commits.
+		let existingContent: string | null = null;
+		try {
+			existingContent = await readFile(filePath, 'utf-8');
+		} catch {
+			// File doesn't exist — first write; fall through to the write path.
+		}
+		if (existingContent === body.content) {
+			return json({ ok: true, path: reqPath, unchanged: true });
+		}
 		await writeFile(filePath, body.content, 'utf-8');
 		await regenerateIndex();
 		await commitWikiChange([filePath, resolve(WIKI_DIR, 'index.md')], reason);
