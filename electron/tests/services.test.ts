@@ -9,7 +9,11 @@ let sessionMocks: Record<string, {
 	setCertificateVerifyProc: ReturnType<typeof vi.fn>;
 	closeAllConnections: ReturnType<typeof vi.fn>;
 	flushStorageData: ReturnType<typeof vi.fn>;
-	cookies: { flushStore: ReturnType<typeof vi.fn> };
+	cookies: {
+		flushStore: ReturnType<typeof vi.fn>;
+		on: ReturnType<typeof vi.fn>;
+		set: ReturnType<typeof vi.fn>;
+	};
 	certVerifyProc?: (req: any, cb: (code: number) => void) => void;
 }> = {};
 
@@ -61,7 +65,11 @@ vi.mock('electron', () => {
 						}),
 						closeAllConnections: vi.fn(() => Promise.resolve()),
 						flushStorageData: vi.fn(() => Promise.resolve()),
-						cookies: { flushStore: vi.fn(() => Promise.resolve()) },
+						cookies: {
+							flushStore: vi.fn(() => Promise.resolve()),
+							on: vi.fn(),
+							set: vi.fn(() => Promise.resolve()),
+						},
 						certVerifyProc: undefined as any,
 					};
 					sessionMocks[partition] = mock;
@@ -130,13 +138,19 @@ describe('services — service view lifecycle manager', () => {
 			expect(createdViews[0].webContents.loadURL).toHaveBeenCalledWith('https://10.0.10.1');
 		});
 
-		it('does NOT attach view to window before load completes', () => {
+		it('attaches the view to the window immediately but hidden', () => {
 			const bounds = { x: 0, y: 0, width: 800, height: 600 };
 			createServiceView(window, appView, 'pfsense', 'https://10.0.10.1', bounds);
 
-			// View is created but not yet attached — waits for did-finish-load
-			// addChildView is NOT called during creation
-			expect(window.contentView.addChildView).not.toHaveBeenCalled();
+			// View is attached to the window hierarchy right away (so we
+			// never have to detach/reattach — that's what kills sessions).
+			expect(window.contentView.addChildView).toHaveBeenCalledWith(createdViews[0]);
+			// …but hidden + offscreen until the page loads successfully.
+			expect(createdViews[0].setVisible).toHaveBeenLastCalledWith(false);
+			const boundsCalls = (createdViews[0].setBounds as any).mock.calls;
+			const lastBounds = boundsCalls[boundsCalls.length - 1][0];
+			expect(lastBounds.x).toBeLessThan(0);
+			expect(lastBounds.width).toBeLessThanOrEqual(1);
 		});
 
 		it('uses persist:service-{id} session partition', () => {
@@ -173,10 +187,23 @@ describe('services — service view lifecycle manager', () => {
 	});
 
 	describe('showServiceView', () => {
-		it('attaches view to window via addChildView', () => {
-			createServiceView(window, appView, 'pfsense', 'https://10.0.10.1', { x: 0, y: 0, width: 800, height: 600 });
+		it('makes the view visible and sets real bounds', () => {
+			const bounds = { x: 0, y: 0, width: 800, height: 600 };
+			createServiceView(window, appView, 'pfsense', 'https://10.0.10.1', bounds);
+			vi.clearAllMocks();
 			showServiceView('pfsense');
-			expect(window.contentView.addChildView).toHaveBeenCalledWith(createdViews[0]);
+			expect(createdViews[0].setVisible).toHaveBeenLastCalledWith(true);
+			expect(createdViews[0].setBounds).toHaveBeenLastCalledWith(bounds);
+		});
+
+		it('does not re-attach the view to the window hierarchy', () => {
+			// The view is attached once in createServiceView and stays.
+			// Re-adding would hit Electron #44652 (stuck view bug).
+			createServiceView(window, appView, 'pfsense', 'https://10.0.10.1', { x: 0, y: 0, width: 800, height: 600 });
+			vi.clearAllMocks();
+			showServiceView('pfsense');
+			expect(window.contentView.addChildView).not.toHaveBeenCalled();
+			expect(window.contentView.removeChildView).not.toHaveBeenCalled();
 		});
 
 		it('returns false for non-existent view', () => {
@@ -185,13 +212,16 @@ describe('services — service view lifecycle manager', () => {
 	});
 
 	describe('hideServiceView', () => {
-		it('detaches view from window via removeChildView', () => {
+		it('hides via setVisible(false) and parks offscreen — never detaches', () => {
 			createServiceView(window, appView, 'pfsense', 'https://10.0.10.1', { x: 0, y: 0, width: 800, height: 600 });
-			// First show it (attach)
 			showServiceView('pfsense');
-			// Then hide it (detach)
+			vi.clearAllMocks();
 			hideServiceView('pfsense');
-			expect(window.contentView.removeChildView).toHaveBeenCalledWith(createdViews[0]);
+			expect(createdViews[0].setVisible).toHaveBeenLastCalledWith(false);
+			const lastBoundsCall = (createdViews[0].setBounds as any).mock.calls.at(-1)[0];
+			expect(lastBoundsCall.x).toBeLessThan(0);
+			// Session survives because the view stays in the hierarchy
+			expect(window.contentView.removeChildView).not.toHaveBeenCalled();
 		});
 
 		it('returns false for non-existent view', () => {
@@ -248,17 +278,17 @@ describe('services — service view lifecycle manager', () => {
 	});
 
 	describe('hideAllServiceViews', () => {
-		it('detaches all attached views', () => {
+		it('hides every service view via setVisible(false) — no detaching', () => {
 			createServiceView(window, appView, 'pfsense', 'https://10.0.10.1', { x: 0, y: 0, width: 400, height: 300 });
 			createServiceView(window, appView, 'proxmox', 'https://10.0.10.2:8006', { x: 400, y: 0, width: 400, height: 300 });
-			// Attach both
 			showServiceView('pfsense');
 			showServiceView('proxmox');
 			vi.clearAllMocks();
-			// Hide all
 			hideAllServiceViews();
-			// removeChildView called once per attached view
-			expect(window.contentView.removeChildView).toHaveBeenCalledTimes(2);
+			// Both views flipped invisible; neither detached (sessions stay alive)
+			expect(createdViews[0].setVisible).toHaveBeenLastCalledWith(false);
+			expect(createdViews[1].setVisible).toHaveBeenLastCalledWith(false);
+			expect(window.contentView.removeChildView).not.toHaveBeenCalled();
 		});
 	});
 
@@ -276,19 +306,20 @@ describe('services — service view lifecycle manager', () => {
 	});
 
 	describe('load state machine', () => {
-		it('attaches view on successful did-finish-load', () => {
+		it('makes the view visible on successful did-finish-load', () => {
 			const bounds = { x: 0, y: 0, width: 800, height: 600 };
 			createServiceView(window, appView, 'pihole', 'http://10.0.10.3', bounds);
-			expect(window.contentView.addChildView).not.toHaveBeenCalled();
+			// Freshly created — hidden and offscreen.
+			expect(createdViews[0].setVisible).toHaveBeenLastCalledWith(false);
 
 			// Simulate successful load
 			createdViews[0].fireEvent('did-finish-load');
 
-			expect(window.contentView.addChildView).toHaveBeenCalledWith(createdViews[0]);
-			expect(createdViews[0].setBounds).toHaveBeenCalledWith(bounds);
+			expect(createdViews[0].setVisible).toHaveBeenLastCalledWith(true);
+			expect(createdViews[0].setBounds).toHaveBeenLastCalledWith(bounds);
 		});
 
-		it('does NOT attach view when did-fail-load fires first (timeout)', () => {
+		it('stays hidden when did-fail-load fires first (timeout)', () => {
 			createServiceView(window, appView, 'offline', 'http://10.0.10.99', { x: 0, y: 0, width: 800, height: 600 });
 
 			// Simulate connection timeout: did-fail-load fires, then Chromium
@@ -296,9 +327,9 @@ describe('services — service view lifecycle manager', () => {
 			createdViews[0].fireEvent('did-fail-load', {}, -118, 'ERR_CONNECTION_TIMED_OUT', 'http://10.0.10.99', true);
 			createdViews[0].fireEvent('did-finish-load');
 
-			// addChildView should NOT have been called — we don't want the
-			// Chromium error page covering the app chrome's error UI
-			expect(window.contentView.addChildView).not.toHaveBeenCalled();
+			// The view stayed hidden — we don't want the Chromium error page
+			// covering the app chrome's error UI.
+			expect(createdViews[0].setVisible).not.toHaveBeenCalledWith(true);
 		});
 
 		it('sends service:load-failed IPC on timeout', () => {
@@ -313,7 +344,7 @@ describe('services — service view lifecycle manager', () => {
 			}));
 		});
 
-		it('does NOT attach view when cert is rejected', () => {
+		it('stays hidden when cert is rejected', () => {
 			createServiceView(window, appView, 'pfsense', 'https://10.0.10.1', { x: 0, y: 0, width: 800, height: 600 });
 
 			// Simulate cert rejection flow: cert proc rejects, did-fail-load fires,
@@ -336,8 +367,8 @@ describe('services — service view lifecycle manager', () => {
 			createdViews[0].fireEvent('did-fail-load', {}, -2, 'ERR_FAILED', 'https://10.0.10.1', true);
 			createdViews[0].fireEvent('did-finish-load');
 
-			// View should NOT be attached
-			expect(window.contentView.addChildView).not.toHaveBeenCalled();
+			// View stays hidden — never flipped visible
+			expect(createdViews[0].setVisible).not.toHaveBeenCalledWith(true);
 		});
 
 		it('suppresses service:load-failed IPC when cert was rejected', () => {
@@ -393,20 +424,23 @@ describe('services — service view lifecycle manager', () => {
 			expect(createdViews[0].webContents.loadURL).toHaveBeenCalledWith('https://10.0.10.1');
 		});
 
-		it('resets load state so did-finish-load re-attaches the view', async () => {
+		it('resets load state so did-finish-load re-shows the view', async () => {
 			createServiceView(window, appView, 'pfsense', 'https://10.0.10.1', { x: 0, y: 0, width: 800, height: 600 });
 
-			// First load fails
+			// First load fails — view stays hidden
 			createdViews[0].fireEvent('did-fail-load', {}, -2, 'ERR_FAILED', 'https://10.0.10.1', true);
 			createdViews[0].fireEvent('did-finish-load');
-			expect(window.contentView.addChildView).not.toHaveBeenCalled();
+			expect(createdViews[0].setVisible).not.toHaveBeenCalledWith(true);
 
 			// Reload (after cert trust)
 			await reloadServiceView('pfsense');
 
-			// Now a successful load should attach the view
+			// Clear the setVisible history so we can assert the next transition
+			(createdViews[0].setVisible as any).mockClear();
+
+			// Now a successful load should flip the view visible
 			createdViews[0].fireEvent('did-finish-load');
-			expect(window.contentView.addChildView).toHaveBeenCalledWith(createdViews[0]);
+			expect(createdViews[0].setVisible).toHaveBeenLastCalledWith(true);
 		});
 
 		it('returns false for non-existent service view', async () => {
@@ -450,24 +484,28 @@ describe('services — service view lifecycle manager', () => {
 		});
 	});
 
-	describe('z-order stacking', () => {
-		it('brings showed view to top (removeChildView + addChildView)', () => {
+	describe('view lifecycle', () => {
+		it('never detaches the view via removeChildView', () => {
+			// The view is attached once in createServiceView and stays there
+			// for its whole life. Hide/show are visibility + bounds operations
+			// so Electron #44652 (stuck view bug) can't bite, and session
+			// cookies survive tab close/reopen.
 			createServiceView(window, appView, 'a', 'http://a', { x: 0, y: 0, width: 100, height: 100 });
 			createdViews[0].fireEvent('did-finish-load');
-			// Now attached — showing again should remove+re-add
-			vi.clearAllMocks();
 			showServiceView('a');
-			expect(window.contentView.removeChildView).toHaveBeenCalled();
-			expect(window.contentView.addChildView).toHaveBeenCalled();
+			hideServiceView('a');
+			showServiceView('a');
+			expect(window.contentView.removeChildView).not.toHaveBeenCalled();
 		});
 
-		it('does not call removeChildView if view is not attached', () => {
+		it('attaches the view exactly once (in createServiceView)', () => {
 			createServiceView(window, appView, 'a', 'http://a', { x: 0, y: 0, width: 100, height: 100 });
-			// did-finish-load NOT fired, view not attached
+			expect(window.contentView.addChildView).toHaveBeenCalledTimes(1);
+			createdViews[0].fireEvent('did-finish-load');
 			showServiceView('a');
-			// Only addChildView should be called, not removeChildView
-			expect(window.contentView.removeChildView).not.toHaveBeenCalled();
-			expect(window.contentView.addChildView).toHaveBeenCalled();
+			hideServiceView('a');
+			showServiceView('a');
+			expect(window.contentView.addChildView).toHaveBeenCalledTimes(1);
 		});
 	});
 
