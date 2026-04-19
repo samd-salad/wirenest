@@ -225,8 +225,14 @@ export function resizeServiceView(id: string, bounds: Rectangle): boolean {
 
 /**
  * Destroy a service view entirely.
+ *
+ * Awaits the session's storage flush BEFORE tearing down the
+ * `webContents`. Without the flush, cookies / localStorage /
+ * IndexedDB writes that the page issued right before the user
+ * clicked "close tab" can be lost — the user then re-opens the
+ * service and finds themselves signed out.
  */
-export function closeServiceView(window: BaseWindow, id: string): boolean {
+export async function closeServiceView(window: BaseWindow, id: string): Promise<boolean> {
 	const view = serviceViews.get(id);
 	if (!view) return false;
 
@@ -234,6 +240,20 @@ export function closeServiceView(window: BaseWindow, id: string): boolean {
 		window.contentView.removeChildView(view);
 		attachedViews.delete(id);
 	}
+
+	// Flush THIS service's session storage so the tab-close doesn't
+	// drop pending writes. Best-effort: a failed flush still proceeds
+	// to view destruction so the UI doesn't hang.
+	try {
+		const s = session.fromPartition(`persist:service-${id}`);
+		await s.flushStorageData();
+		if (typeof s.cookies.flushStore === 'function') {
+			await s.cookies.flushStore();
+		}
+	} catch (err) {
+		console.error(`[services] Failed to flush storage for ${id} on close:`, err);
+	}
+
 	view.webContents.close();
 	serviceViews.delete(id);
 	serviceUrls.delete(id);

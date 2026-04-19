@@ -214,15 +214,36 @@ describe('services — service view lifecycle manager', () => {
 	});
 
 	describe('closeServiceView', () => {
-		it('removes view and closes webContents', () => {
+		it('removes view and closes webContents', async () => {
 			createServiceView(window, appView, 'pfsense', 'https://10.0.10.1', { x: 0, y: 0, width: 800, height: 600 });
-			closeServiceView(window, 'pfsense');
+			await closeServiceView(window, 'pfsense');
 			expect(createdViews[0].webContents.close).toHaveBeenCalled();
 			expect(hasServiceView('pfsense')).toBe(false);
 		});
 
-		it('returns false for non-existent view', () => {
-			expect(closeServiceView(window, 'nonexistent')).toBe(false);
+		it('flushes session storage before destroying the view', async () => {
+			createServiceView(window, appView, 'pihole', 'http://10.0.10.3', { x: 0, y: 0, width: 800, height: 600 });
+			const sess = sessionMocks['persist:service-pihole'];
+			await closeServiceView(window, 'pihole');
+			expect(sess.flushStorageData).toHaveBeenCalled();
+			expect(sess.cookies.flushStore).toHaveBeenCalled();
+			// Flush order: storage flush must resolve before webContents.close
+			expect(sess.flushStorageData).toHaveBeenCalledBefore(
+				createdViews[createdViews.length - 1].webContents.close as any,
+			);
+		});
+
+		it('returns false for non-existent view', async () => {
+			expect(await closeServiceView(window, 'nonexistent')).toBe(false);
+		});
+
+		it('still destroys the view if flush throws', async () => {
+			createServiceView(window, appView, 'broken', 'https://x.local', { x: 0, y: 0, width: 800, height: 600 });
+			const sess = sessionMocks['persist:service-broken'];
+			sess.flushStorageData.mockImplementationOnce(() => Promise.reject(new Error('disk full')));
+			const ok = await closeServiceView(window, 'broken');
+			expect(ok).toBe(true);
+			expect(hasServiceView('broken')).toBe(false);
 		});
 	});
 
@@ -404,9 +425,9 @@ describe('services — service view lifecycle manager', () => {
 			expect(getServiceViewUrl('nonexistent')).toBeUndefined();
 		});
 
-		it('clears URL after closeServiceView', () => {
+		it('clears URL after closeServiceView', async () => {
 			createServiceView(window, appView, 'pfsense', 'https://10.0.10.1', { x: 0, y: 0, width: 800, height: 600 });
-			closeServiceView(window, 'pfsense');
+			await closeServiceView(window, 'pfsense');
 			expect(getServiceViewUrl('pfsense')).toBeUndefined();
 		});
 	});

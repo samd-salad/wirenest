@@ -169,7 +169,7 @@ function registerIpcHandlers(): void {
 		return resizeServiceView(id, bounds);
 	});
 
-	ipcMain.handle('service:close', (event, id) => {
+	ipcMain.handle('service:close', async (event, id) => {
 		assertAppChrome(event.sender.id);
 		assertServiceId(id);
 		if (!mainWindow) throw new Error('No window');
