@@ -94,7 +94,7 @@ Phase 4 closes the "real API tokens on disk" threat for single-operator homelab 
 
 ---
 
-## Process Isolation — NOT IMPLEMENTED (Phase 2)
+## Process Isolation (Phase 2 — SHIPPED)
 
 ### The Electron security model
 
@@ -149,7 +149,7 @@ enforcement — and that didn't work.
 
 ---
 
-## Certificate Handling — NOT IMPLEMENTED (Phase 2)
+## Certificate Handling (Phase 2 — SHIPPED)
 
 ### TOFU (Trust-on-First-Use)
 
@@ -189,7 +189,7 @@ Removed entirely. Every certificate decision is:
 
 ---
 
-## Credential Storage — NOT IMPLEMENTED (Phase 4)
+## Credential Storage (Phase 4 — SHIPPED)
 
 ### Encryption at rest
 
@@ -222,7 +222,7 @@ key is managed by the OS — it's tied to the user session.
 
 ---
 
-## Network Communication — NOT IMPLEMENTED (Phase 2/4)
+## Network Communication (Phase 2/4 — SHIPPED)
 
 ### TLS for API calls (from main process)
 
@@ -254,7 +254,7 @@ exposure on the wire.
 
 ---
 
-## Session Isolation — NOT IMPLEMENTED (Phase 2)
+## Session Isolation (Phase 2 — SHIPPED)
 
 Each service WebContentsView uses a separate Electron session:
 - `persist:service-pfsense`
@@ -296,7 +296,7 @@ are preserved across sessions.
 - `sync_log` table records every connector run with counts and errors
 - User overrides tracked in `field_override` table
 
-### Credential references — NOT IMPLEMENTED (Phase 4)
+### Credential references (Phase 4 — SHIPPED)
 - Encrypted blobs stored in SQLite, decrypted via `safeStorage` in main process
 - Plaintext secrets never stored on disk, never sent to renderers
 

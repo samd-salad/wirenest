@@ -94,7 +94,7 @@ When in doubt, skip the page. Write it later, when a real moment makes you reach
 - Speculative plans — only write what's been decided or discovered
 
 ### Verify facts before writing
-**Never write hardware specs, IPs, VLANs, build parts, or device details from memory.** Always query the DB first using MCP tools (`wirenest_get_device`, `wirenest_list_vlans`, etc.) and use those values. If the DB doesn't have the data, say so rather than guessing. Reference DB entities by name instead of duplicating their facts:
+**Never write hardware specs, IPs, VLANs, build parts, or device details from memory.** Always query the DB first using MCP tools (`sot.get("device:7")`, `sot.list("vlan")`, etc.) and use those values. If the DB doesn't have the data, say so rather than guessing. Reference DB entities by name instead of duplicating their facts:
 
 **Bad:** "Snap: Intel N100, 32GB DDR5, 2TB NVMe, running Proxmox 8.3"
 **Good:** "See the Snap device/build in WireNest for current specs. The N100 was chosen for its low TDP while supporting 4 cores and ECC..."

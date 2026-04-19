@@ -1,6 +1,6 @@
 # WireNest — Roadmap
 
-> Your nest, wire by wire. Last updated 2026-04-17.
+> Your nest, wire by wire. Last updated 2026-04-19.
 
 ## Product framing (refined 2026-04-13)
 
@@ -18,85 +18,15 @@ Scale target: 16-24 devices, ~8 VLANs, one operator. Anything enterprise-shaped 
 6. **Test alongside, not after.** Every new or reimplemented module gets tests covering the happy path and at least one failure case. See [ARCHITECTURE.md §14](ARCHITECTURE.md#14-testing-strategy) for the full testing strategy.
 7. **Tool surface discipline.** MCP namespaces are `sot.*` and `wiki.*`. Target ~13 tools total (history folds into `sot.changes_since` — no `log.*` namespace). Tool definitions are 400–500 tokens each; a bloated surface burns context before any work happens.
 
-## Audit Notes (2026-04-13)
+## Design evolution
 
-### Scope reframe: personal-homelab, not agent SoT platform
+The 2026-04-12/13 audits reframed WireNest from an agent-SoT platform into a personal, homelab-scale wiki/DB pairing. Everything enterprise-shaped got cut from the Phase 3 scope: IPAM prefix tree (`prefix`, `ip_range`, `sot.next_ip`), curated `v_*` view layer, `note` table, recursive dependency walker, `sot.query(sql)`, separate `log.*` namespace. A 28-tool MCP surface shrank to 13 across `sot.*` + `wiki.*`, with history folded into `sot.changes_since` and `sot.get(..., include_history=true)`.
 
-The 2026-04-12 reframe got the product right — wiki+DB pairing, MCP surface, change log — but sized the Phase 3 scope for a bigger, more agent-queryable SoT platform than fits a single-operator homelab. At 16-24 devices across ~8 VLANs, a prefix tree, curated `v_*` view layer, `note` table, recursive dependency walker, and `sot.query(sql)` are all overkill. The real product is smaller:
+Those cuts shipped in Phase 3 (2026-04-17). What survived: `@sot:` / `@api:` marker resolver, typed frontmatter + alias auto-linking, `change_log` + mutation instrumentation, opportunistic MCP rename. The current roadmap reflects the reframed scope, not the original spec.
 
-- **DB is already visible to humans** via the existing device and build pages — shipped in Phase 1. No new query layer is needed for the UI.
-- **Wiki is the new layer.** Paired with the DB via `<!-- @sot:... -->` markers. This is the one thing nothing else in the homelab space does, and it's the whole reason Phase 3 exists.
-- **MCP is how agents see both.** A small tool surface (~13 tools, two namespaces) that hits the same Drizzle queries as the UI. Nothing exotic.
-
-**Cut from Phase 3:**
-- **Step 2 — IPAM prefix tree.** `prefix` + `ip_range` tables, recursive CTE for "next free IP", `v_prefix_utilization` view. At this scale, `ip_address` with a `vlan_id` FK plus a 5-line query handles "next free IP in VLAN 20". Build the tree only if the flat model fails a real workflow.
-- **Step 6 — curated `v_*` view layer.** `v_device_full`, `v_vlan_residents`, `v_service_dependencies`, `v_dependency_edges`. Agents don't need a parallel query surface — they hit the same Drizzle queries that back the device/build pages. `sot.dependents` becomes a plain FK join at max depth 2.
-- **Step 7 — `note` table.** Short narrative goes in a `## Notes` section of the entity's wiki page. One less store.
-- **`sot.query(sql)`** from the MCP surface. No agent SQL at this scale.
-- **`sot.next_ip`, `sot.allocate_vlan`** — dependent on the cut IPAM tree / not needed at 20-device scale.
-- **Separate `log.*` namespace.** Folds into `sot.changes_since(ts)` and `sot.get(ref, include_history=true)`.
-
-**Survives Phase 3:**
-- **`@sot:` / `@api:` markers + render pipeline** (was Step 4 — now **Step 1**, ships first because it proves the product)
-- **Typed wiki frontmatter + alias auto-linking** (was Step 3 / 4b — now **Step 2**)
-- **`change_log` table + mutation instrumentation** (was Step 1 — now **Step 3**, still foundational but can follow the demo-able work)
-- **MCP surface shrink** (was Step 5 — now **Step 4**, opportunistic, 28 tools → 13)
-- **Unified sidebar + co-location** (was Step 8 — now **Step 5**, deferrable frontend work)
-
-**Revised target MCP surface: 13 tools.** 8 `sot.*` + 5 `wiki.*`. No `log.*` namespace. Details in [ARCHITECTURE.md §8.1](ARCHITECTURE.md#81-target-surface).
-
-### Implementation order
-
-1. **Marker resolver end-to-end, one page.** Pick `vlans/vlan-20.md`, write it with 2-3 `<!-- @sot:vlan/20.subnet -->` markers, build the resolver in the SvelteKit server layer. The smallest possible demo of the wiki/DB pairing — ~100 lines.
-2. **Typed frontmatter + alias map.** Frontmatter schema, alias trie, render-time auto-linking with stop-word rejection and collision detection. Required for real cross-linking and for Step 3's backlinks.
-3. **change_log + one mutation wrapped.** Add the table, write `logMutation()`, wrap `PUT /api/devices/:id` in a tx that writes the log row. Tests assert before/after shape. Port the rest of the mutation paths once the shape is proven.
-4. **MCP shrink, opportunistic.** Rename `wirenest_*` → `sot.*`/`wiki.*` as each tool is touched for other reasons. Short flag-gated overlap window, then delete the old names.
-5. **Sidebar rework.** Deferrable frontend work — start only after Steps 1-4 are stable.
-
----
-
-## Audit Notes (2026-04-12)
-
-### What's changed since the 2026-04-11 audit
-
-- **Phase 2 (Electron shell) is done.** `electron/main.ts`, `services.ts`, `certificates.ts`, `preload.ts`, `validation.ts` are all shipped with test coverage. TOFU cert handling works. `--ignore-certificate-errors` is gone. The old ROADMAP entry marking Phase 2 "NOT STARTED" was stale — this revision corrects it.
-- **Product reframe.** After a competitive review (Ferdium ships the tabbed webview shell with self-signed cert support; Homepage ships live widgets with deeper Proxmox/pfSense API integration than a desktop wrapper can; Proxmox Datacenter Manager 1.0 shipped stable Dec 2025), the Electron shell is no longer the headline. The SoT + wiki + MCP layer is where WireNest has a defensible niche in April 2026 — specifically, **a homelab-scale relational SoT that an agent can query and join across**, which no other tool provides.
-- **New Phase 3 scope.** Phase 3 (MCP) was "finish the remaining wiki/sync tools." It's now the product core: change_log, typed wiki frontmatter, SoT fact markers, namespaced MCP tool surface, curated `v_*` view layer, and the dependency walker. See [ARCHITECTURE.md §6–§9](ARCHITECTURE.md#6-source-of-truth-data-model) for the full design.
-
-### Scope Creep (still relevant)
-
-WireNest is still carrying more surface area than one person should maintain. The original audit items mostly still apply — and several are now explicit Phase 3 work:
-
-**Action items:**
-- [x] Remove `@tauri-apps/api` and `@tauri-apps/cli` from package.json — done as part of Phase 2.
-- [ ] Audit the 18-table schema — `metric` and `firewall_rule` should either get populated during Phase 6 sync work or be dropped. Unused schema is cognitive overhead.
-- [ ] Start service integrations with pfSense + Proxmox + Pi-hole. Portainer/Grafana/Uptime Kuma wait until the core three are solid. Each service's API maintenance cost compounds.
-- [x] MCP server is treated as independently valuable — it ships today against the live API and doesn't gate on the shell.
-- [x] `@xterm/xterm` — removed from `package.json` (was already stripped; ROADMAP caught up 2026-04-17). Terminal feature stays deferred.
-
-### Security Concerns (current state)
-
-1. **Storing real credentials is still not safe.** Phase 4 (safeStorage) has not shipped. The DB is plaintext SQLite, the API is unauthenticated on localhost, and the MCP server reads creds from env vars. Dev-machine-only until Phase 4 lands. See [SECURITY.md](SECURITY.md) "Current State vs Target State."
-2. **Audit IPC caller validation.** [ARCHITECTURE.md §11.6](ARCHITECTURE.md#116-ipc-channel-validation) commits to `event.sender.id` checks on every `ipcMain.handle`. Verify every handler in `main.ts` actually enforces this. Service views have no preload so they can't reach IPC in the first place — but the sender check is the design commitment.
-3. **`trusted-certs.json` is keyed by hostname, not hostname:port.** Two services on the same IP (e.g., Portainer `:9443` and something else `:8443` on `10.0.30.2`) will collide. Low-priority fix.
-4. **`trusted-certs.json` is unsigned.** Local malware running as the user can append entries. Wrap the file with `safeStorage` when Phase 4 ships — same envelope the DB will need.
-5. **`wiki.write` needs a hallucination gate.** The validation hook described in [§7.5](ARCHITECTURE.md#75-agent-write-discipline-how-we-stop-hallucination) must be enforced, not advisory — otherwise agents will silently write unsourced claims into the SoT's narrative side.
-
-### Feasibility Risks
-
-1. **Phase 3 is the make-or-break milestone.** Without markers + render pipeline the wiki stays a free-form dumping ground and the pairing doesn't exist. Without change_log the mutation history isn't reconstructable and `sot.changes_since` can't be built. The 2026-04-13 reframe cuts enough scope (IPAM tree, view layer, note table, recursive walker) to make the remaining work fit one operator.
-2. **MCP tool surface bloat.** Current 28 tools × 400–500 tokens each = ~12K of context burned on tool defs before work starts. The refactor to ~13 namespaced tools (§8.1) is not optional — it's load-bearing.
-3. **The co-location UX is the shell's one job.** If the pfSense tab isn't actually docked beside its wiki page with the same DB entities linked, the shell has no reason to exist. Don't polish the shell beyond that.
-4. **Service API maintenance is ongoing.** Unchanged — scope down to services you actually touch daily.
-5. **Scope-creep watch.** Every time you catch yourself reaching for a `v_*` view, a prefix table, or a recursive CTE, ask whether a real workflow needs it today or whether it's just "NetBox-shaped completeness." Default to cutting.
-
-### Recommendations (priority order)
-
-1. **Phase 3 is the sole focus.** Markers + render pipeline first (proves the product), then typed frontmatter + aliases, then change_log, then opportunistic MCP shrink. Sidebar rework is deferrable.
-2. Trim the 28-tool surface as each tool is touched for other reasons. Short flag-gated overlap window, then aggressive deletion — don't ship both surfaces long-term.
-3. Phase 4 (credential storage) is the gate to any real use. Don't let it slip behind Phase 3 — a complete product core with no safe credential store is still a demo.
-4. Phase 6 (scheduled sync + drift) waits on Phase 4. Don't start sync work with plaintext creds.
-5. The shell is "done enough." Unless a specific co-location bug appears, don't polish it.
+Ongoing carry-over from those audits:
+- `metric` and `firewall_rule` tables are still empty. Either get populated by Phase 6 sync or get dropped.
+- `wiki.write` has a required `reason` but no source-validation gate. Hallucination protection remains advisory until §7.5's validator is wired up.
 
 ---
 
@@ -104,27 +34,21 @@ WireNest is still carrying more surface area than one person should maintain. Th
 
 ```
 Phase 2: Electron shell        DONE
+Phase 3: Wiki/DB pairing + change_log + MCP shrink   DONE
+Phase 4: Secure credential storage (safeStorage)     DONE
     │
-    ▼
-Phase 3: Wiki/DB pairing + change_log + MCP shrink   <-- CURRENT FOCUS
-    │   (markers + render pipeline, typed frontmatter + alias map,
-    │    change_log instrumentation, 28→13 MCP surface shrink,
-    │    unified sidebar — in that order)
-    │
-    ├──► Phase 4: Secure credential storage (safeStorage)
-    │       │
-    │       ├──► Phase 5: Setup wizard (cert trust + credential entry + discovery)
+    ├──► Phase 5: Setup wizard (cert trust + credential entry + discovery)
     │       │
     │       └──► Phase 6: Scheduled sync + drift reconciliation
-    │
-    └──► (Phase 3 unlocks agent workflows immediately — they don't
-          need Phase 4/5/6 to demonstrate value)
+    │                       │
+    │                       └──► Phase 7: Interactive tools
 ```
 
-Phase 3 is the product core and is the current focus. Phase 4 is the real
-gate to production use — everything after it depends on having encrypted
-credentials. Phase 6 (sync + drift) waits on Phase 4 so it's not storing
-plaintext API tokens.
+Phases 1-4 are shipped. Phase 5 is partially landed (cert + credential
+steps are on real IPC; initial discovery lands with Phase 6). Phase 6
+is next — scheduled sync against pfSense/Proxmox/Pi-hole producing
+drift rows for review. Phase 7 (firewall map, rack modeler, power
+budget) is the interactive-UI layer on top of everything.
 
 ---
 

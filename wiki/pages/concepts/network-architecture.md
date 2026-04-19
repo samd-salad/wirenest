@@ -4,8 +4,8 @@ slug: network-architecture
 type: concept
 status: current
 created: 2026-04-12
-updated: 2026-04-18
-last_verified: 2026-04-18
+updated: 2026-04-19
+last_verified: 2026-04-19
 confidence: high
 sources:
   - raw/network-overview.md
@@ -79,7 +79,7 @@ See WireNest DB for the authoritative port map. Snapshot as of 2026-04-12:
 | gi5 | Y | Pi 5 (Docker) | Access: VLAN 30 untagged |
 | gi6 | Y | Future Pi 5 | Access: VLAN 30 untagged |
 | gi7 | N | Meatwad (PC) | Access: VLAN 20 untagged |
-| gi10 | N | Snap (Proxmox) | Access: VLAN 30 untagged |
+| gi10 | N | Snap (Proxmox) | General/trunk: VLAN 30 untagged, VLAN 70 tagged (DMZ LXCs). |
 | gi11 | N | Crackle (Proxmox) | Access: VLAN 30 untagged |
 | gi12 | N | Pop (NAS) | Access: VLAN 30 untagged |
 | gi13 | Y | EAP670 (AP) | General: VLAN 10 untagged, 25/40/50 tagged |
@@ -100,16 +100,17 @@ See [[setup-eap670]] for full AP configuration.
 
 See [[pfsense-firewall-rules]] for the full rule-by-rule implementation.
 
-| Source -> Dest | Mgmt | Trusted | Mobile | Servers | IoT | Guest |
-|--------------|------|---------|--------|---------|-----|-------|
-| **Management** | -- | | | | | |
-| **Trusted** | Admin (80,443,22) | -- | | All | | |
-| **Mobile** | DNS only | | -- | All | | |
-| **Servers** | DNS only | | | -- | HA->IoT | |
-| **IoT** | DNS only | | | | -- | |
-| **Guest** | DNS only | | | | | -- |
+| Source -> Dest | Mgmt | Trusted | Mobile | Servers | IoT | Guest | DMZ |
+|--------------|------|---------|--------|---------|-----|-------|-----|
+| **Management** | -- | | | | | | |
+| **Trusted** | Admin (80,443,22) | -- | | All | | | All |
+| **Mobile** | DNS only | | -- | All | | | |
+| **Servers** | DNS only | | | -- | HA->IoT | | |
+| **IoT** | DNS only | | | | -- | | |
+| **Guest** | DNS only | | | | | -- | |
+| **DMZ** | DNS only | | | | | | -- |
 
-Blank cells = blocked (pfSense implicit deny). All VLANs get DNS to Pi-hole (10.0.10.3:53) and internet access. IoT and Guest are RFC1918-blocked (internet only, no lateral movement).
+Blank cells = blocked (pfSense implicit deny). All VLANs get DNS to Pi-hole (10.0.10.3:53) and internet access. IoT and Guest are RFC1918-blocked (internet only, no lateral movement). **DMZ is hard-isolated from every internal VLAN** and from pfSense self IPs via a `Mgmt_hosts` alias — only Pi-hole DNS and outbound WAN are allowed. See [[vlan-70]].
 
 ## pfSense Aliases
 
@@ -119,6 +120,8 @@ Blank cells = blocked (pfSense implicit deny). All VLANs get DNS to Pi-hole (10.
 | PIHOLE | Host | 10.0.10.3 | |
 | eap670 | Host | 10.0.10.7 | Renamed from legacy `r7000p` |
 | dns_ports | Port | 53 | |
+| Mgmt_hosts | Host | 10.0.10.1, 10.0.20.1, 10.0.25.1, 10.0.30.1, 10.0.40.1, 10.0.50.1, 10.0.60.1, 10.0.70.1 | Every VLAN gateway IP. Used by DMZ block-to-self rule. Must include the DMZ's own gateway. |
+| pfB_NAmerica_v4 | Network | (pfBlockerNG GeoIP) | North America IPv4 source filter for the Minecraft WAN NAT rule. IPv6 entries intentionally removed. |
 
 ## Key Gotchas
 
@@ -130,6 +133,8 @@ Blank cells = blocked (pfSense implicit deny). All VLANs get DNS to Pi-hole (10.
 - **DHCP snooping:** NOT available on SG200 (SG300+ only). Lost this capability in the Aruba -> SG200 migration. Physical security and management VLAN isolation are the mitigations.
 - **SG200 management VLAN trap:** "VLAN interface state" must be enabled on a VLAN before it can be selected as the management VLAN. Name is misleading. See [[migrate-aruba-to-sg200]].
 - **pfSense self-IP access:** VLANs with outbound catch-all rules can reach any pfSense interface IP (e.g., 10.0.0.1 from Meatwad) unless explicitly blocked. See [[pfsense-block-to-self]].
+- **vmbr0 must be VLAN-aware for DMZ LXCs.** Snap's bridge ships with VLAN awareness off by default; any LXC that sets a VLAN tag (including every DMZ LXC) fails to start with "Failed to create network device" until it's enabled under Snap → System → Network → vmbr0 → VLAN aware.
+- **Cloudflare proxy breaks non-HTTP DMZ services.** DDNS records pointing at the WAN IP for DMZ services must stay **gray-cloud / DNS-only**. Orange-cloud (proxied) Cloudflare records resolve to edge IPs that don't accept TCP 25565 or similar non-web ports.
 
 ## Related
 
@@ -140,3 +145,5 @@ Blank cells = blocked (pfSense implicit deny). All VLANs get DNS to Pi-hole (10.
 - [[migrate-aruba-to-sg200]] -- Switch migration and SG200 gotchas
 - [[sg200-lockdown]] -- SG200 hardening checklist
 - [[network-hardening-playbook]] -- Security hardening roadmap
+- [[vlan-70]] -- DMZ VLAN: threat model, trunk config, isolation test, public-exposure path
+- [[public-exposure-plan]] -- Phased rollout of publicly reachable services (DMZ phase is live)

@@ -1699,12 +1699,25 @@ aliases, then change_log, then opportunistic MCP cleanup.
 5. Tests: search ranking across three sources, co-location dock for all
    8 wiki page types
 
-### Phase 4 — Secure credential storage — NOT STARTED
+### Phase 4 — Secure credential storage — SHIPPED 2026-04-17
 
-Moves real API tokens into DPAPI-encrypted blobs. Blocks any production
-use. See ROADMAP.md for dependencies.
+Plaintext secrets enter main via `credential:save`, are encrypted via
+`safeStorage` (DPAPI on Windows, Keychain on macOS, libsecret on
+Linux), and land in `credential.secret_blob` as opaque bytes. The
+renderer has no read path. `trusted-certs.json` uses the same envelope
+with atomic tmp+fsync+rename writes. `/api/credentials` is gated by a
+per-boot shared-secret token exported to the spawned SvelteKit server,
+so other local processes can't reach the endpoint. `UNIQUE(secret_ref)`
++ `ON CONFLICT DO UPDATE` makes upserts atomic at SQL. Change-log rows
+for credential mutations store projected metadata with
+`hasSecret: boolean`, never the blob.
 
-### Phase 5 — Setup wizard — NOT STARTED
+### Phase 5 — Setup wizard — IN PROGRESS
+
+Cert-trust and credential-save steps wired to the real
+`window.wirenest` IPC (rewritten during the 2026-04-17 bug-fix pass
+that replaced pre-Phase-4 stubs). Initial-discovery step lands with
+Phase 6 sync machinery.
 
 ### Phase 6 — Scheduled sync + drift — NOT STARTED
 
