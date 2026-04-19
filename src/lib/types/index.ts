@@ -51,6 +51,7 @@ export interface WireNestAPI {
 	hideServiceView: (id: string) => Promise<boolean>;
 	resizeServiceView: (id: string, bounds: Bounds) => Promise<boolean>;
 	closeServiceView: (id: string) => Promise<boolean>;
+	refreshServiceView: (id: string) => Promise<boolean>;
 	hideAllServiceViews: () => Promise<void>;
 
 	// Certificate trust (Step 3)

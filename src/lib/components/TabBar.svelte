@@ -53,6 +53,13 @@
 		panels.closeTab(tab.id, panelId);
 	}
 
+	async function onRefreshTab(e: MouseEvent, tab: Tab) {
+		e.stopPropagation();
+		if (tab.type !== 'service') return;
+		const key = tab.serviceId ?? tab.id;
+		try { await window.wirenest?.refreshServiceView(key); } catch {}
+	}
+
 	function onMouseDown(e: MouseEvent, tab: Tab) {
 		if (e.button === 1) {
 			e.preventDefault();
@@ -188,6 +195,11 @@
 						<line x1="8" y1="1" x2="8" y2="15" stroke="currentColor" stroke-width="1.2"/>
 					</svg>
 				</button>
+				{#if tab.type === 'service'}
+					<button class="tab-action" onclick={(e) => onRefreshTab(e, tab)} title="Refresh (Ctrl+R)" aria-label="Refresh">
+						<svg viewBox="0 0 24 24" width="12" height="12">{@html getIcon('refresh')}</svg>
+					</button>
+				{/if}
 				<button class="tab-close" onclick={(e) => onCloseTab(e, tab)} title="Close">
 					<svg viewBox="0 0 16 16" width="12" height="12">
 						<path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" fill="none"/>
@@ -332,6 +344,21 @@
 		color: var(--color-bg);
 		box-shadow: 0 0 6px color-mix(in srgb, var(--color-accent) 40%, transparent);
 	}
+
+	.tab-action {
+		background: none;
+		border: none;
+		color: var(--color-text-muted);
+		cursor: pointer;
+		padding: 2px;
+		border-radius: 3px;
+		display: flex;
+		align-items: center;
+		opacity: 0;
+		transition: opacity 0.1s ease, color 0.1s ease;
+	}
+	.tab:hover .tab-action { opacity: 0.6; }
+	.tab-action:hover { opacity: 1 !important; color: var(--color-accent); }
 
 	.tab-close {
 		background: none;

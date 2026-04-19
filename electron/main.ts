@@ -15,6 +15,7 @@ import {
 	forEachServiceView,
 	getServiceViewUrl,
 	reloadServiceView,
+	refreshServiceView,
 } from './services';
 import {
 	loadTrustedCerts,
@@ -174,6 +175,13 @@ function registerIpcHandlers(): void {
 		assertServiceId(id);
 		if (!mainWindow) throw new Error('No window');
 		return closeServiceView(mainWindow, id);
+	});
+
+	// Soft reload (like F5 in a browser) — keeps cookies + localStorage.
+	ipcMain.handle('service:refresh', (event, id) => {
+		assertAppChrome(event.sender.id);
+		assertServiceId(id);
+		return refreshServiceView(id);
 	});
 
 	ipcMain.handle('service:hide-all', (event) => {

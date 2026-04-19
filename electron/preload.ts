@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld('wirenest', {
 		ipcRenderer.invoke('service:resize', id, bounds),
 	closeServiceView: (id: string): Promise<boolean> =>
 		ipcRenderer.invoke('service:close', id),
+	refreshServiceView: (id: string): Promise<boolean> =>
+		ipcRenderer.invoke('service:refresh', id),
 	hideAllServiceViews: (): Promise<void> =>
 		ipcRenderer.invoke('service:hide-all'),
 

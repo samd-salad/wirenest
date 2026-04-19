@@ -5,7 +5,8 @@
 	import StatusBar from '$lib/components/StatusBar.svelte';
 	import FactSheet from '$lib/components/FactSheet.svelte';
 	import SetupWizard from '$lib/components/SetupWizard.svelte';
-	import { panels } from '$lib/stores/tabs';
+	import { panels, activePanelId } from '$lib/stores/tabs';
+	import { get } from 'svelte/store';
 	import { sidebarOpen, sidebarWidth } from '$lib/stores/sidebar';
 	import '$lib/stores/theme.svelte';
 	import { browser } from '$app/environment';
@@ -58,8 +59,32 @@
 					// Focus the sidebar and show add service — toggle sidebar open if closed
 					sidebarOpen.set(true);
 					break;
+				case 'r':
+				case 'R':
+					// Ctrl+R refreshes the active service view (like F5
+					// in a browser). We intercept it so Electron's
+					// default full-app-reload doesn't fire.
+					if (refreshActiveServiceTab()) e.preventDefault();
+					break;
 			}
 		}
+		if (e.key === 'F5') {
+			if (refreshActiveServiceTab()) e.preventDefault();
+		}
+	}
+
+	/** Returns true if we refreshed a service view — tells the caller
+	 *  whether to swallow the event. */
+	function refreshActiveServiceTab(): boolean {
+		if (!browser || typeof window.wirenest?.refreshServiceView !== 'function') return false;
+		const activeId = get(activePanelId);
+		const panel = get(panels).find((p) => p.id === activeId);
+		if (!panel) return false;
+		const tab = panel.tabs.find((t) => t.id === panel.activeTabId);
+		if (!tab || tab.type !== 'service') return false;
+		const key = tab.serviceId ?? tab.id;
+		window.wirenest.refreshServiceView(key).catch(() => { /* best-effort */ });
+		return true;
 	}
 
 	// Sidebar drag resize

@@ -235,6 +235,19 @@ export async function reloadServiceView(id: string): Promise<boolean> {
 }
 
 /**
+ * Soft-reload a service view — equivalent to the user pressing F5 in a
+ * browser. Preserves cookies, localStorage, and the session partition;
+ * just re-fetches the current page. Distinct from `reloadServiceView`,
+ * which is for cert-trust retry and aggressively resets the transport.
+ */
+export function refreshServiceView(id: string): boolean {
+	const view = serviceViews.get(id);
+	if (!view) return false;
+	view.webContents.reload();
+	return true;
+}
+
+/**
  * Show a service view by setting its real bounds and flipping visibility
  * to true. The view stays in the contentView hierarchy — we never
  * re-attach after the initial createServiceView, which keeps the
