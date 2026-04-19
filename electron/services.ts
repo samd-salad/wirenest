@@ -278,6 +278,36 @@ export function closeAllServiceViews(window: BaseWindow): void {
 }
 
 /**
+ * Flush every service session's unwritten storage (cookies, localStorage,
+ * IndexedDB) to disk. Called before app quit so sign-in state persists
+ * across restarts — without this, `webContents.close()` tears views down
+ * too eagerly and DOMStorage writes can be lost in flight.
+ *
+ * Returns the list of active service IDs so callers can do further
+ * per-service cleanup if needed.
+ */
+export async function flushAllServiceSessions(): Promise<string[]> {
+	const ids = Array.from(serviceViews.keys());
+	await Promise.all(
+		ids.map(async (id) => {
+			try {
+				const s = session.fromPartition(`persist:service-${id}`);
+				await s.flushStorageData();
+				// Cookies are flushed separately on some Electron versions —
+				// explicit call is cheap and belt-and-braces.
+				if (typeof s.cookies.flushStore === 'function') {
+					await s.cookies.flushStore();
+				}
+			} catch (err) {
+				// Best-effort; don't block shutdown on a single failing session.
+				console.error(`[services] Failed to flush storage for ${id}:`, err);
+			}
+		}),
+	);
+	return ids;
+}
+
+/**
  * Get the original URL for a service view.
  */
 export function getServiceViewUrl(id: string): string | undefined {

@@ -11,6 +11,7 @@ import {
 	closeServiceView,
 	hideAllServiceViews,
 	closeAllServiceViews,
+	flushAllServiceSessions,
 	forEachServiceView,
 	getServiceViewUrl,
 	reloadServiceView,
@@ -368,13 +369,32 @@ app.whenReady().then(async () => {
 	}
 });
 
-app.on('window-all-closed', () => {
+// Flush service-session storage BEFORE we start tearing things down so
+// cookies / localStorage / IndexedDB all land on disk. Without this the
+// eager `webContents.close()` drops writes in flight and users have to
+// sign in again on every app restart.
+let shuttingDown = false;
+
+async function gracefulShutdown(): Promise<void> {
+	if (shuttingDown) return;
+	shuttingDown = true;
+	try {
+		await flushAllServiceSessions();
+	} catch (err) {
+		console.error('[wirenest] flushAllServiceSessions failed:', err);
+	}
 	if (mainWindow) closeAllServiceViews(mainWindow);
 	shutdownDevServer();
+}
+
+app.on('window-all-closed', async () => {
+	await gracefulShutdown();
 	app.quit();
 });
 
-app.on('before-quit', () => {
-	if (mainWindow) closeAllServiceViews(mainWindow);
-	shutdownDevServer();
+app.on('before-quit', (event) => {
+	if (shuttingDown) return;
+	// Defer the actual quit until storage flush completes.
+	event.preventDefault();
+	gracefulShutdown().finally(() => app.exit(0));
 });

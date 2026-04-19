@@ -8,6 +8,8 @@ let fromPartitionCalls: string[] = [];
 let sessionMocks: Record<string, {
 	setCertificateVerifyProc: ReturnType<typeof vi.fn>;
 	closeAllConnections: ReturnType<typeof vi.fn>;
+	flushStorageData: ReturnType<typeof vi.fn>;
+	cookies: { flushStore: ReturnType<typeof vi.fn> };
 	certVerifyProc?: (req: any, cb: (code: number) => void) => void;
 }> = {};
 
@@ -58,6 +60,8 @@ vi.mock('electron', () => {
 							mock.certVerifyProc = proc;
 						}),
 						closeAllConnections: vi.fn(() => Promise.resolve()),
+						flushStorageData: vi.fn(() => Promise.resolve()),
+						cookies: { flushStore: vi.fn(() => Promise.resolve()) },
 						certVerifyProc: undefined as any,
 					};
 					sessionMocks[partition] = mock;
@@ -76,6 +80,7 @@ import {
 	closeServiceView,
 	hideAllServiceViews,
 	closeAllServiceViews,
+	flushAllServiceSessions,
 	hasServiceView,
 	getServiceViewCount,
 	reloadServiceView,
@@ -469,6 +474,40 @@ describe('services — service view lifecycle manager', () => {
 			vi.clearAllMocks();
 			showServiceView('a');
 			expect(createdViews[0].setBounds).toHaveBeenCalledWith(newBounds);
+		});
+	});
+
+	describe('flushAllServiceSessions', () => {
+		it('calls flushStorageData on every active service session', async () => {
+			const window = { contentView: { addChildView: vi.fn(), removeChildView: vi.fn() } } as any;
+			const appView = { webContents: { isDestroyed: () => false, send: vi.fn() } } as any;
+			createServiceView(window, appView, 'pfsense', 'https://pfsense.local', { x: 0, y: 0, width: 800, height: 600 });
+			createServiceView(window, appView, 'pihole', 'http://pihole.local', { x: 0, y: 0, width: 800, height: 600 });
+
+			const ids = await flushAllServiceSessions();
+			expect(ids.sort()).toEqual(['pfsense', 'pihole']);
+			expect(sessionMocks['persist:service-pfsense'].flushStorageData).toHaveBeenCalled();
+			expect(sessionMocks['persist:service-pihole'].flushStorageData).toHaveBeenCalled();
+			expect(sessionMocks['persist:service-pfsense'].cookies.flushStore).toHaveBeenCalled();
+			expect(sessionMocks['persist:service-pihole'].cookies.flushStore).toHaveBeenCalled();
+		});
+
+		it('resolves even if one session throws on flush', async () => {
+			const window = { contentView: { addChildView: vi.fn(), removeChildView: vi.fn() } } as any;
+			const appView = { webContents: { isDestroyed: () => false, send: vi.fn() } } as any;
+			createServiceView(window, appView, 'broken', 'https://broken.local', { x: 0, y: 0, width: 800, height: 600 });
+			createServiceView(window, appView, 'ok', 'https://ok.local', { x: 0, y: 0, width: 800, height: 600 });
+
+			sessionMocks['persist:service-broken'].flushStorageData
+				.mockImplementationOnce(() => Promise.reject(new Error('disk full')));
+			// Should not throw — errors are per-session best-effort.
+			await expect(flushAllServiceSessions()).resolves.toBeTruthy();
+			expect(sessionMocks['persist:service-ok'].flushStorageData).toHaveBeenCalled();
+		});
+
+		it('is a no-op when there are no service views', async () => {
+			const ids = await flushAllServiceSessions();
+			expect(ids).toEqual([]);
 		});
 	});
 });
