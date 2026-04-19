@@ -263,15 +263,19 @@
 		}
 	});
 
-	// Detect closed tabs and destroy their service views
+	// Detect closed tabs. Closing a tab only HIDES the service view —
+	// we keep the `WebContentsView` (and therefore the session cookies,
+	// localStorage, and auth state) alive so re-opening the tab doesn't
+	// force a re-login. Session cookies die with the webContents; they
+	// only persist as long as we keep the view around. The view is
+	// actually destroyed on service removal (sidebar) or app quit.
 	let prevTabIds = new Set<string>();
 	$effect(() => {
 		if (!isElectron) return;
 		const currentIds = new Set(allPanels.flatMap((p) => p.tabs.map((t) => t.id)));
 		for (const id of prevTabIds) {
 			if (!currentIds.has(id) && createdServiceViews[id]) {
-				window.wirenest!.closeServiceView(id);
-				delete createdServiceViews[id];
+				window.wirenest!.hideServiceView(id);
 			}
 		}
 		prevTabIds = currentIds;

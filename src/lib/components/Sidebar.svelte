@@ -459,8 +459,12 @@
 		showAddMenu = false;
 	}
 
-	function removeService(e: MouseEvent, id: string) {
+	async function removeService(e: MouseEvent, id: string) {
 		e.stopPropagation();
+		// Drop the WebContentsView + its session entirely when the
+		// service is removed — tab close only hides the view now, so
+		// we need an explicit destroy path for real deletion.
+		try { await window.wirenest?.closeServiceView(id); } catch {}
 		services.removeService(id);
 		if (editingId === id) editingId = null;
 	}
