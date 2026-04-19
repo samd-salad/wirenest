@@ -1042,14 +1042,14 @@
 	.sidebar-divider { height: 1px; background: var(--color-border); margin: 0.5rem 0; }
 	.empty-hint { font-size: 0.8rem; color: var(--color-text-muted); padding: 0.75rem 0.5rem; text-align: center; opacity: 0.6; line-height: 1.5; }
 
-	.add-panel, .edit-panel { background: var(--color-bg-elevated); border: 1px solid var(--color-border); border-radius: 6px; margin: 0.25rem 0; overflow-y: auto; max-height: 60vh; }
+	.add-panel, .edit-panel { background: var(--color-bg-elevated); border: 1px solid var(--color-border); border-radius: 6px; margin: 0.25rem 0; overflow-y: auto; max-height: 75vh; }
 	.edit-panel { padding: 0.5rem; display: flex; flex-direction: column; gap: 0.4rem; }
 	.add-tabs { display: flex; border-bottom: 1px solid var(--color-border); }
 	.add-tabs button { flex: 1; padding: 0.4rem; background: none; border: none; color: var(--color-text-muted); cursor: pointer; font-size: 0.75rem; font-weight: 600; }
 	.add-tabs button:hover { color: var(--color-text); }
 	.add-tabs button.active { color: var(--color-accent); border-bottom: 2px solid var(--color-accent); }
 
-	.catalog-list { max-height: 240px; overflow-y: auto; }
+	.catalog-list { max-height: 55vh; overflow-y: auto; }
 	.catalog-item { display: flex; align-items: center; gap: 0.5rem; width: 100%; padding: 0.4rem 0.5rem; background: none; border: none; color: var(--color-text); cursor: pointer; font-size: 0.8rem; text-align: left; }
 	.catalog-item:hover { background: var(--color-bg); }
 	.catalog-icon { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }

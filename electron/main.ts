@@ -199,10 +199,17 @@ function registerIpcHandlers(): void {
 	ipcMain.handle('service:autofill', async (event, id: string, options: {
 		usernameSelector?: string | null;
 		passwordSelector?: string | null;
+		expectedOrigin?: string | null;
 		autoSubmit?: boolean;
 	} = {}) => {
 		assertAppChrome(event.sender.id);
 		assertServiceId(id);
+		// Origin must be a valid URL origin if supplied — prevents the
+		// renderer from passing in wildcards or malformed values.
+		if (options.expectedOrigin != null) {
+			if (typeof options.expectedOrigin !== 'string') throw new Error('expectedOrigin must be string');
+			try { new URL(options.expectedOrigin); } catch { throw new Error('expectedOrigin not a valid URL'); }
+		}
 		const secretRef = `service:${id}`;
 		const has = await hasCredential({ baseUrl: SVELTEKIT_URL }, secretRef);
 		if (!has) return { filled: false, reason: 'no_credential' };
@@ -218,6 +225,7 @@ function registerIpcHandlers(): void {
 				username: meta?.username ?? null,
 				usernameSelector: options.usernameSelector ?? null,
 				passwordSelector: options.passwordSelector ?? null,
+				expectedOrigin: options.expectedOrigin ?? null,
 				autoSubmit: options.autoSubmit === true,
 			});
 		});

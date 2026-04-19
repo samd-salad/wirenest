@@ -32,7 +32,12 @@ contextBridge.exposeInMainWorld('wirenest', {
 		ipcRenderer.invoke('service:refresh', id),
 	autofillServiceLogin: (
 		id: string,
-		options?: { usernameSelector?: string | null; passwordSelector?: string | null; autoSubmit?: boolean },
+		options?: {
+			usernameSelector?: string | null;
+			passwordSelector?: string | null;
+			expectedOrigin?: string | null;
+			autoSubmit?: boolean;
+		},
 	): Promise<{ filled: boolean; reason?: string }> =>
 		ipcRenderer.invoke('service:autofill', id, options ?? {}),
 	hideAllServiceViews: (): Promise<void> =>

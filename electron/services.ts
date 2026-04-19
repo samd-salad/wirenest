@@ -258,6 +258,13 @@ export interface FillLoginOptions {
 	usernameSelector?: string | null;
 	passwordSelector?: string | null;
 	autoSubmit?: boolean;
+	/**
+	 * Expected origin of the service's login page (scheme + host + port).
+	 * If set, the injector refuses to fill when the current page's origin
+	 * doesn't match — guards against typing the password into an
+	 * unexpected redirect or a navigated-away page.
+	 */
+	expectedOrigin?: string | null;
 }
 
 /**
@@ -280,6 +287,24 @@ export async function fillServiceLogin(
 ): Promise<FillLoginResult> {
 	const view = serviceViews.get(id);
 	if (!view) return { filled: false, reason: 'no_view' };
+
+	// Origin check — refuse to fill into a page whose origin doesn't
+	// match the service's configured URL. If the service redirected to
+	// a different domain (accidental nav, phishing, misconfig), we do
+	// NOT want to hand the password to that page.
+	if (options.expectedOrigin) {
+		try {
+			const currentUrl = view.webContents.getURL();
+			if (currentUrl) {
+				const currentOrigin = new URL(currentUrl).origin;
+				if (currentOrigin !== options.expectedOrigin) {
+					return { filled: false, reason: 'origin_mismatch' };
+				}
+			}
+		} catch {
+			return { filled: false, reason: 'origin_unreadable' };
+		}
+	}
 
 	// JSON.stringify handles every quote/newline/unicode case cleanly —
 	// and keeps the password as a literal string in the executed code

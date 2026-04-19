@@ -69,9 +69,15 @@
 		if (tab.type !== 'service' || !tab.serviceId) return;
 		if (!window.wirenest?.autofillServiceLogin) return;
 		const service = $services.find((s) => s.id === tab.serviceId);
+		// Compute the expected origin from the service's configured URL
+		// so the injector refuses to fill into a page that redirected
+		// elsewhere (phishing, misconfig, surprise navigation).
+		let expectedOrigin: string | null = null;
+		try { if (service?.url) expectedOrigin = new URL(service.url).origin; } catch {}
 		const result = await window.wirenest.autofillServiceLogin(tab.serviceId, {
 			usernameSelector: service?.loginUsernameSelector ?? null,
 			passwordSelector: service?.loginPasswordSelector ?? null,
+			expectedOrigin,
 		}).catch((err) => ({ filled: false, reason: String(err) }));
 
 		let message = '';
@@ -83,6 +89,9 @@
 			error = true;
 		} else if (result.reason === 'no_password_field') {
 			message = 'No login form on this page';
+			error = true;
+		} else if (result.reason === 'origin_mismatch') {
+			message = 'Refused: this page is on a different domain than the service';
 			error = true;
 		} else {
 			message = `Autofill failed (${result.reason ?? 'unknown'})`;
