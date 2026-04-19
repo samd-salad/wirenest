@@ -92,12 +92,25 @@ export interface Service {
 }
 
 export interface Tab {
+	/**
+	 * Unique tab identifier, fresh UUID per tab. DO NOT use this as the
+	 * key for session-bearing resources (WebContentsView / cookie
+	 * partitions). Closing and re-opening a tab produces a new `id` —
+	 * use `serviceId` for service views so their session survives.
+	 */
 	id: string;
 	type: 'service' | 'docs' | 'terminal' | 'network' | 'custom' | 'devices' | 'builds' | 'infrastructure' | 'tool';
 	title: string;
 	icon: string;
 	/** URL for service tabs */
 	url?: string;
+	/**
+	 * Stable service identifier for `type: 'service'` tabs. Matches the
+	 * `Service.id` from the services store; used as the key for the
+	 * long-lived WebContentsView + `persist:service-<id>` cookie
+	 * partition so the session survives tab close/reopen.
+	 */
+	serviceId?: string;
 	/** Path for doc tabs */
 	docPath?: string;
 	/** Default sub-view for infrastructure tabs */

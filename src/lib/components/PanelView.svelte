@@ -169,32 +169,45 @@
 		};
 	}
 
-	async function createView(tabId: string, url: string, el: HTMLElement) {
-		if (!isElectron || createdServiceViews[tabId]) return;
+	/**
+	 * Key for a service's WebContentsView. Service tabs carry a stable
+	 * `serviceId`; fall back to the (ephemeral) tab id for legacy tabs
+	 * that predate the serviceId field. The fallback preserves behavior
+	 * for those — they'll still lose state on close/reopen until the
+	 * service is removed and re-added.
+	 */
+	function viewKeyFor(tab: Tab): string {
+		return tab.serviceId ?? tab.id;
+	}
+
+	async function createView(tab: Tab, url: string, el: HTMLElement) {
+		if (!isElectron) return;
+		const key = viewKeyFor(tab);
+		if (createdServiceViews[key]) return;
 		const bounds = getBoundsFromEl(el);
 		if (bounds.width <= 0 || bounds.height <= 0) return;
 
-		loadingServiceViews[tabId] = true;
+		loadingServiceViews[key] = true;
 
 		try {
-			await window.wirenest!.createServiceView(tabId, url, bounds);
-			createdServiceViews[tabId] = true;
+			await window.wirenest!.createServiceView(key, url, bounds);
+			createdServiceViews[key] = true;
 		} catch (err) {
-			delete loadingServiceViews[tabId];
-			failedServiceViews[tabId] = String(err);
+			delete loadingServiceViews[key];
+			failedServiceViews[key] = String(err);
 		}
 	}
 
-	function isServiceFailed(tabId: string): boolean {
-		return tabId in failedServiceViews;
+	function isServiceFailed(tab: Tab): boolean {
+		return viewKeyFor(tab) in failedServiceViews;
 	}
 
-	function getServiceError(tabId: string): string {
-		return failedServiceViews[tabId] ?? '';
+	function getServiceError(tab: Tab): string {
+		return failedServiceViews[viewKeyFor(tab)] ?? '';
 	}
 
-	function isServiceLoading(tabId: string): boolean {
-		return loadingServiceViews[tabId] === true;
+	function isServiceLoading(tab: Tab): boolean {
+		return loadingServiceViews[viewKeyFor(tab)] === true;
 	}
 
 	function getHostname(url: string): string | null {
@@ -215,14 +228,15 @@
 		const cert = pendingCerts[hostname];
 		if (!cert) return;
 
+		const key = viewKeyFor(tab);
 		try {
 			await window.wirenest!.trustCertificate(
 				cert.hostname, cert.fingerprint, cert.issuer, cert.subject, cert.validExpiry,
 			);
 			delete pendingCerts[hostname];
-			delete failedServiceViews[tab.id];
+			delete failedServiceViews[key];
 		} catch (err) {
-			failedServiceViews[tab.id] = String(err);
+			failedServiceViews[key] = String(err);
 		}
 	}
 
@@ -231,34 +245,36 @@
 		const hostname = getHostname(tab.url);
 		if (!hostname) return;
 		delete pendingCerts[hostname];
-		failedServiceViews[tab.id] = 'Certificate rejected by user.';
+		failedServiceViews[viewKeyFor(tab)] = 'Certificate rejected by user.';
 	}
 
 	async function retryView(tab: Tab, el: HTMLElement) {
-		delete failedServiceViews[tab.id];
-		delete createdServiceViews[tab.id];
-		try { await window.wirenest?.closeServiceView(tab.id); } catch {}
-		if (tab.url) await createView(tab.id, tab.url, el);
+		const key = viewKeyFor(tab);
+		delete failedServiceViews[key];
+		delete createdServiceViews[key];
+		try { await window.wirenest?.closeServiceView(key); } catch {}
+		if (tab.url) await createView(tab, tab.url, el);
 	}
 
-	// Track active tab changes to show/hide service views
-	let prevActiveIds: Record<string, string> = {};
+	// Track active tab changes to show/hide service views. We key on
+	// `viewKeyFor(tab)` so closing and reopening a service tab lands
+	// on the SAME WebContentsView (keyed by service.id), not a fresh
+	// one (which would force a full reload + login).
+	let prevActiveKeys: Record<string, string> = {};
 	$effect(() => {
 		if (!isElectron) return;
 		for (const panel of allPanels) {
-			const prev = prevActiveIds[panel.id];
-			const curr = panel.activeTabId;
-			if (prev === curr) continue;
-			prevActiveIds[panel.id] = curr;
-
-			// Hide previous service view
-			if (prev && createdServiceViews[prev]) {
-				window.wirenest!.hideServiceView(prev);
-			}
-			// Show current service view
+			const prevKey = prevActiveKeys[panel.id];
 			const activeTab = getActiveTab(panel);
-			if (activeTab?.type === 'service' && createdServiceViews[activeTab.id]) {
-				window.wirenest!.showServiceView(activeTab.id);
+			const currKey = activeTab?.type === 'service' ? viewKeyFor(activeTab) : '';
+			if (prevKey === currKey) continue;
+			prevActiveKeys[panel.id] = currKey;
+
+			if (prevKey && createdServiceViews[prevKey]) {
+				window.wirenest!.hideServiceView(prevKey);
+			}
+			if (currKey && createdServiceViews[currKey]) {
+				window.wirenest!.showServiceView(currKey);
 			}
 		}
 	});
@@ -266,19 +282,33 @@
 	// Detect closed tabs. Closing a tab only HIDES the service view —
 	// we keep the `WebContentsView` (and therefore the session cookies,
 	// localStorage, and auth state) alive so re-opening the tab doesn't
-	// force a re-login. Session cookies die with the webContents; they
-	// only persist as long as we keep the view around. The view is
-	// actually destroyed on service removal (sidebar) or app quit.
-	let prevTabIds = new Set<string>();
+	// force a re-login. The view is actually destroyed on service
+	// removal (sidebar) or app quit.
+	//
+	// We track (tabId → viewKey) so when a tab disappears from the
+	// tree we know which view to hide. Tracking by tabId alone would
+	// break because tab UUIDs are fresh on each openTab — and anyway,
+	// viewKey is what we actually pass to the Electron API.
+	let prevTabToKey = new Map<string, string>();
 	$effect(() => {
 		if (!isElectron) return;
-		const currentIds = new Set(allPanels.flatMap((p) => p.tabs.map((t) => t.id)));
-		for (const id of prevTabIds) {
-			if (!currentIds.has(id) && createdServiceViews[id]) {
-				window.wirenest!.hideServiceView(id);
+		const currentTabToKey = new Map<string, string>();
+		for (const panel of allPanels) {
+			for (const tab of panel.tabs) {
+				if (tab.type === 'service') {
+					currentTabToKey.set(tab.id, viewKeyFor(tab));
+				}
 			}
 		}
-		prevTabIds = currentIds;
+		// Hide views for service tabs that were just closed, unless
+		// another open tab still references the same service.
+		const stillOpenKeys = new Set(currentTabToKey.values());
+		for (const [tabId, key] of prevTabToKey) {
+			if (!currentTabToKey.has(tabId) && !stillOpenKeys.has(key) && createdServiceViews[key]) {
+				window.wirenest!.hideServiceView(key);
+			}
+		}
+		prevTabToKey = currentTabToKey;
 	});
 
 	// Svelte action for service view placeholders:
@@ -288,10 +318,12 @@
 		let observer: ResizeObserver | undefined;
 
 		function syncBounds() {
-			if (!isElectron || !createdServiceViews[params.tab.id]) return;
+			if (!isElectron) return;
+			const key = viewKeyFor(params.tab);
+			if (!createdServiceViews[key]) return;
 			const bounds = getBoundsFromEl(node);
 			if (bounds.width > 0 && bounds.height > 0) {
-				window.wirenest!.resizeServiceView(params.tab.id, bounds);
+				window.wirenest!.resizeServiceView(key, bounds);
 			}
 		}
 
@@ -299,7 +331,7 @@
 		if (params.isActive && params.tab.url) {
 			// Defer to next frame so the element has layout
 			requestAnimationFrame(() => {
-				if (params.tab.url) createView(params.tab.id, params.tab.url, node);
+				if (params.tab.url) createView(params.tab, params.tab.url, node);
 			});
 		}
 
@@ -315,9 +347,10 @@
 			update(newParams: { tab: Tab; isActive: boolean }) {
 				params = newParams;
 				// If becoming active and not yet created, create now
-				if (params.isActive && params.tab.url && !createdServiceViews[params.tab.id]) {
+				const key = viewKeyFor(params.tab);
+				if (params.isActive && params.tab.url && !createdServiceViews[key]) {
 					requestAnimationFrame(() => {
-						if (params.tab.url) createView(params.tab.id, params.tab.url, node);
+						if (params.tab.url) createView(params.tab, params.tab.url, node);
 					});
 				}
 				syncBounds();
@@ -448,14 +481,14 @@
 										<button class="action-btn" onclick={() => rejectCert(tab)}>Reject</button>
 									</div>
 								</div>
-							{:else if isServiceFailed(tab.id)}
+							{:else if isServiceFailed(tab)}
 								<div class="service-blocked">
 									<div class="blocked-icon">
 										<svg viewBox="0 0 24 24" width="48" height="48">{@html getIcon(tab.icon)}</svg>
 									</div>
 									<h3>{tab.title}</h3>
 									<p>Failed to load this service.</p>
-									<p class="blocked-hint error-detail">{getServiceError(tab.id)}</p>
+									<p class="blocked-hint error-detail">{getServiceError(tab)}</p>
 									<div class="blocked-actions">
 										<button class="action-btn primary" onclick={(e) => {
 											const el = (e.currentTarget as HTMLElement).closest('.service-view-placeholder') as HTMLDivElement;
@@ -463,7 +496,7 @@
 										}}>Retry</button>
 									</div>
 								</div>
-							{:else if isServiceLoading(tab.id)}
+							{:else if isServiceLoading(tab)}
 								<div class="service-blocked">
 									<div class="loading-spinner"></div>
 									<h3>Connecting to {tab.title}</h3>

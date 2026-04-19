@@ -404,7 +404,17 @@
 	let availableCatalog = $derived(SERVICE_CATALOG.filter((c) => !addedNames.has(c.name)));
 
 	function openService(service: Service) {
-		panels.openTab({ type: 'service', title: service.name, icon: service.icon, url: service.url });
+		panels.openTab({
+			type: 'service',
+			title: service.name,
+			icon: service.icon,
+			url: service.url,
+			// Stable service id → WebContentsView partition key. The
+			// tab UUID is fresh on every openTab, so we can't use it
+			// as the session bearer — that would kill login state on
+			// every close/reopen.
+			serviceId: service.id,
+		});
 	}
 
 	function openDocs() {
