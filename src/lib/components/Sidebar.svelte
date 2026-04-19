@@ -35,13 +35,18 @@
 	let editCategory = $state('network');
 
 	// Credential state (for the edit panel)
-	let credType = $state<CredentialType>('api_token');
+	let credType = $state<CredentialType>('username_password');
+	let credUsername = $state('');
 	let credValue = $state('');
 	let credHasStored = $state(false);
 	let credTestResult = $state('');
 	let credTestError = $state(false);
 	let credSaving = $state(false);
 	let credTesting = $state(false);
+	// Per-service login form selector overrides (rare — most sites work
+	// with the heuristic autofill).
+	let editLoginUsernameSelector = $state('');
+	let editLoginPasswordSelector = $state('');
 
 	const credentialTypes: { value: CredentialType; label: string }[] = [
 		{ value: 'api_token', label: 'API Token (Bearer)' },
@@ -488,12 +493,15 @@
 		editIcon = service.icon;
 		editColor = service.color ?? '#5db870';
 		editCategory = service.category;
+		editLoginUsernameSelector = service.loginUsernameSelector ?? '';
+		editLoginPasswordSelector = service.loginPasswordSelector ?? '';
 		// Reset credential state
+		credUsername = '';
 		credValue = '';
 		credTestResult = '';
 		credTestError = false;
 		credHasStored = false;
-		credType = 'api_token';
+		credType = 'username_password';
 		// Check if credential already exists
 		if (isCredentialStorageAvailable()) {
 			hasCredential(service.id).then((has) => { credHasStored = has; }).catch(() => {});
@@ -508,12 +516,15 @@
 			icon: editIcon,
 			color: editColor,
 			category: editCategory,
+			loginUsernameSelector: editLoginUsernameSelector.trim() || undefined,
+			loginPasswordSelector: editLoginPasswordSelector.trim() || undefined,
 		});
 		editingId = null;
 	}
 
 	function cancelEdit() {
 		editingId = null;
+		credUsername = '';
 		credValue = '';
 		credTestResult = '';
 	}
@@ -763,20 +774,32 @@
 												<option value={ct.value}>{ct.label}</option>
 											{/each}
 										</select>
+										{#if credType === 'username_password'}
+											<input
+												type="text"
+												class="form-input"
+												bind:value={credUsername}
+												placeholder="Username (optional — used by autofill)"
+												autocomplete="off"
+											/>
+										{/if}
 										<input
 											type="password"
 											class="form-input mono"
 											bind:value={credValue}
-											placeholder="Paste API token or password..."
+											placeholder={credType === 'username_password' ? 'Password...' : 'Paste API token...'}
 										/>
 										<button class="form-btn confirm" disabled={!credValue || credSaving} onclick={async () => {
 											if (!editingId || !credValue) return;
 											credSaving = true;
 											try {
-												await saveCredential(editingId, credType, credValue);
+												await saveCredential(editingId, credType, credValue, {
+													username: credUsername.trim() || null,
+												});
 												credHasStored = true;
 												credValue = '';
-												credTestResult = 'Saved. Click Test to verify.';
+												credUsername = '';
+												credTestResult = 'Saved. Use the key icon on the service tab to sign in.';
 												credTestError = false;
 											} catch (e) { credTestResult = String(e); credTestError = true; }
 											credSaving = false;

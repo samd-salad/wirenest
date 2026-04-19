@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { panels, activePanelId } from '$lib/stores/tabs';
 	import { sidebarOpen } from '$lib/stores/sidebar';
+	import { services } from '$lib/stores/services';
 	import { getIcon } from './icons';
 	import type { Tab } from '$lib/types';
 
@@ -58,6 +59,40 @@
 		if (tab.type !== 'service') return;
 		const key = tab.serviceId ?? tab.id;
 		try { await window.wirenest?.refreshServiceView(key); } catch {}
+	}
+
+	/** Transient status shown next to the tab after an autofill attempt. */
+	let autofillStatus = $state<Record<string, { message: string; error: boolean }>>({});
+
+	async function onSignInTab(e: MouseEvent, tab: Tab) {
+		e.stopPropagation();
+		if (tab.type !== 'service' || !tab.serviceId) return;
+		if (!window.wirenest?.autofillServiceLogin) return;
+		const service = $services.find((s) => s.id === tab.serviceId);
+		const result = await window.wirenest.autofillServiceLogin(tab.serviceId, {
+			usernameSelector: service?.loginUsernameSelector ?? null,
+			passwordSelector: service?.loginPasswordSelector ?? null,
+		}).catch((err) => ({ filled: false, reason: String(err) }));
+
+		let message = '';
+		let error = false;
+		if (result.filled) {
+			message = 'Filled — press Enter to sign in';
+		} else if (result.reason === 'no_credential') {
+			message = 'No credential saved — set one in the sidebar';
+			error = true;
+		} else if (result.reason === 'no_password_field') {
+			message = 'No login form on this page';
+			error = true;
+		} else {
+			message = `Autofill failed (${result.reason ?? 'unknown'})`;
+			error = true;
+		}
+		autofillStatus = { ...autofillStatus, [tab.id]: { message, error } };
+		// Clear after a few seconds
+		setTimeout(() => {
+			autofillStatus = Object.fromEntries(Object.entries(autofillStatus).filter(([k]) => k !== tab.id));
+		}, 4000);
 	}
 
 	function onMouseDown(e: MouseEvent, tab: Tab) {
@@ -196,6 +231,9 @@
 					</svg>
 				</button>
 				{#if tab.type === 'service'}
+					<button class="tab-action" onclick={(e) => onSignInTab(e, tab)} title="Fill saved credential" aria-label="Fill saved credential">
+						<svg viewBox="0 0 24 24" width="12" height="12">{@html getIcon('key')}</svg>
+					</button>
 					<button class="tab-action" onclick={(e) => onRefreshTab(e, tab)} title="Refresh (Ctrl+R)" aria-label="Refresh">
 						<svg viewBox="0 0 24 24" width="12" height="12">{@html getIcon('refresh')}</svg>
 					</button>
@@ -217,6 +255,19 @@
 		</button>
 	{/if}
 </div>
+
+{#if tabs.some((t) => autofillStatus[t.id])}
+	<div class="autofill-toasts">
+		{#each tabs as tab (tab.id)}
+			{#if autofillStatus[tab.id]}
+				<div class="autofill-toast" class:error={autofillStatus[tab.id].error}>
+					<span class="toast-label">{tab.title}:</span>
+					{autofillStatus[tab.id].message}
+				</div>
+			{/if}
+		{/each}
+	</div>
+{/if}
 
 <style>
 	.tab-bar {
@@ -359,6 +410,29 @@
 	}
 	.tab:hover .tab-action { opacity: 0.6; }
 	.tab-action:hover { opacity: 1 !important; color: var(--color-accent); }
+
+	.autofill-toasts {
+		position: absolute;
+		top: 36px;
+		right: 12px;
+		z-index: 500;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		pointer-events: none;
+	}
+	.autofill-toast {
+		background: var(--color-bg-elevated);
+		border: 1px solid var(--color-accent);
+		color: var(--color-text);
+		font-size: 0.8rem;
+		padding: 0.4rem 0.75rem;
+		border-radius: 6px;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+		max-width: 360px;
+	}
+	.autofill-toast.error { border-color: var(--color-danger, #b42318); }
+	.toast-label { font-weight: 600; margin-right: 0.35rem; }
 
 	.tab-close {
 		background: none;

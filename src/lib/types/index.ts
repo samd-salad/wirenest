@@ -52,6 +52,10 @@ export interface WireNestAPI {
 	resizeServiceView: (id: string, bounds: Bounds) => Promise<boolean>;
 	closeServiceView: (id: string) => Promise<boolean>;
 	refreshServiceView: (id: string) => Promise<boolean>;
+	autofillServiceLogin: (
+		id: string,
+		options?: { usernameSelector?: string | null; passwordSelector?: string | null; autoSubmit?: boolean },
+	) => Promise<{ filled: boolean; reason?: string }>;
 	hideAllServiceViews: () => Promise<void>;
 
 	// Certificate trust (Step 3)
@@ -90,6 +94,14 @@ export interface Service {
 		base: string;
 		auth: 'token' | 'jwt' | 'session' | 'bearer';
 	};
+	/**
+	 * Optional CSS selectors for the service's login form. The autofill
+	 * injector falls back to heuristics (`input[type="password"]`, nearby
+	 * text/email input) when these are absent. Set them on sites with
+	 * non-standard forms (SPAs, custom component libraries).
+	 */
+	loginUsernameSelector?: string;
+	loginPasswordSelector?: string;
 }
 
 export interface Tab {

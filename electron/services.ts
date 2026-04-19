@@ -247,6 +247,125 @@ export function refreshServiceView(id: string): boolean {
 	return true;
 }
 
+export interface FillLoginResult {
+	filled: boolean;
+	/** "no_view" | "no_password_field" | "failed_eval" | "" */
+	reason?: string;
+}
+
+export interface FillLoginOptions {
+	username?: string | null;
+	usernameSelector?: string | null;
+	passwordSelector?: string | null;
+	autoSubmit?: boolean;
+}
+
+/**
+ * Fill the login form of a service view with the supplied credentials.
+ *
+ * The caller (the IPC handler) has already decrypted the password via
+ * `useCredential`. We pass it into `executeJavaScript` as a JSON-encoded
+ * literal so the page can set the input value — no stringified function
+ * that would expose the plaintext in a stack trace.
+ *
+ * Heuristic: find the visible `input[type="password"]`; find the
+ * nearest text/email/username input in the same form. Per-service
+ * overrides win over the heuristic. Fire `input` + `change` events
+ * after setting so React/Vue-style reactive forms pick up the change.
+ */
+export async function fillServiceLogin(
+	id: string,
+	password: string,
+	options: FillLoginOptions = {},
+): Promise<FillLoginResult> {
+	const view = serviceViews.get(id);
+	if (!view) return { filled: false, reason: 'no_view' };
+
+	// JSON.stringify handles every quote/newline/unicode case cleanly —
+	// and keeps the password as a literal string in the executed code
+	// without any interpolation needed.
+	const payload = JSON.stringify({
+		u: options.username ?? null,
+		p: password,
+		us: options.usernameSelector ?? null,
+		ps: options.passwordSelector ?? null,
+		submit: options.autoSubmit === true,
+	});
+
+	// The injected IIFE — runs in the service view's renderer, finds
+	// the fields, fills them, returns a serializable result. Variable
+	// names are deliberately terse so the plaintext doesn't sit next
+	// to anything that screams "password" in a stack trace.
+	const script = `
+		(function (data) {
+			function set(el, v) {
+				var setter = Object.getOwnPropertyDescriptor(el.__proto__ || Object.getPrototypeOf(el), 'value');
+				if (setter && setter.set) setter.set.call(el, v); else el.value = v;
+				el.dispatchEvent(new Event('input', { bubbles: true }));
+				el.dispatchEvent(new Event('change', { bubbles: true }));
+			}
+			function visible(el) {
+				if (!el || !el.isConnected) return false;
+				var r = el.getBoundingClientRect();
+				return r.width > 0 && r.height > 0;
+			}
+			var pw = null;
+			if (data.ps) {
+				try { pw = document.querySelector(data.ps); } catch (e) {}
+			}
+			if (!pw) {
+				var pwList = Array.prototype.slice.call(document.querySelectorAll('input[type="password"]'));
+				pw = pwList.filter(visible)[0] || pwList[0] || null;
+			}
+			if (!pw) return { filled: false, reason: 'no_password_field' };
+
+			var user = null;
+			if (data.us) {
+				try { user = document.querySelector(data.us); } catch (e) {}
+			}
+			if (!user && data.u) {
+				var form = pw.closest('form') || document;
+				var candidates = Array.prototype.slice.call(form.querySelectorAll('input'))
+					.filter(function (el) {
+						var t = (el.type || '').toLowerCase();
+						return el !== pw && t !== 'password' && t !== 'hidden' && t !== 'submit' && t !== 'button' && t !== 'checkbox' && t !== 'radio';
+					});
+				var byHint = candidates.find(function (el) {
+					return /user|email|login|name/i.test(
+						(el.name || '') + ' ' + (el.id || '') + ' ' +
+						(el.getAttribute('autocomplete') || '') + ' ' +
+						(el.placeholder || ''),
+					);
+				});
+				user = byHint || candidates[0] || null;
+			}
+			if (user && data.u) set(user, data.u);
+			set(pw, data.p);
+
+			if (data.submit) {
+				var form = pw.closest('form');
+				if (form) {
+					var submitBtn = form.querySelector('button[type="submit"], input[type="submit"]');
+					if (submitBtn) submitBtn.click();
+					else if (typeof form.requestSubmit === 'function') form.requestSubmit();
+					else form.submit();
+				}
+			}
+			return { filled: true, username_set: !!(user && data.u) };
+		})(${payload});
+	`;
+
+	try {
+		const result = (await view.webContents.executeJavaScript(script, true)) as FillLoginResult & { username_set?: boolean };
+		return { filled: result?.filled === true, reason: result?.reason };
+	} catch (err) {
+		// Never surface the script source (contains plaintext) — terse msg only.
+		console.error(`[services] autofill eval failed for ${id}`);
+		void err;
+		return { filled: false, reason: 'failed_eval' };
+	}
+}
+
 /**
  * Show a service view by setting its real bounds and flipping visibility
  * to true. The view stays in the contentView hierarchy — we never

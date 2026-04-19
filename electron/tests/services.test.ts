@@ -24,6 +24,10 @@ vi.mock('electron', () => {
 		webContents = {
 			loadURL: vi.fn(),
 			close: vi.fn(),
+			reload: vi.fn(),
+			executeJavaScript: vi.fn((_code: string, _userGesture?: boolean) =>
+				Promise.resolve({ filled: true, username_set: true }),
+			),
 			setWindowOpenHandler: vi.fn(),
 			on: vi.fn((event: string, handler: Function) => {
 				if (!this.eventListeners[event]) this.eventListeners[event] = [];
@@ -89,6 +93,7 @@ import {
 	hideAllServiceViews,
 	closeAllServiceViews,
 	flushAllServiceSessions,
+	fillServiceLogin,
 	hasServiceView,
 	getServiceViewCount,
 	reloadServiceView,
@@ -567,6 +572,77 @@ describe('services — service view lifecycle manager', () => {
 		it('is a no-op when there are no service views', async () => {
 			const ids = await flushAllServiceSessions();
 			expect(ids).toEqual([]);
+		});
+	});
+
+	describe('fillServiceLogin', () => {
+		it('returns filled:false no_view when the service doesn\'t exist', async () => {
+			const result = await fillServiceLogin('missing', 'hunter2');
+			expect(result).toEqual({ filled: false, reason: 'no_view' });
+		});
+
+		it('passes username + password into executeJavaScript as a JSON literal', async () => {
+			const window = { contentView: { addChildView: vi.fn(), removeChildView: vi.fn() } } as any;
+			const appView = { webContents: { isDestroyed: () => false, send: vi.fn() } } as any;
+			createServiceView(window, appView, 'pfsense', 'https://pfsense.local', { x: 0, y: 0, width: 800, height: 600 });
+			const view = createdViews[createdViews.length - 1];
+
+			const result = await fillServiceLogin('pfsense', 'hunter2', { username: 'admin' });
+			expect(result.filled).toBe(true);
+
+			// The injected script receives a JSON-encoded data object. We
+			// verify the plaintext was embedded but nothing else leaks —
+			// specifically, no `password:` keyword that would suggest
+			// secret content in a stack trace.
+			const code = (view.webContents.executeJavaScript as any).mock.calls[0][0] as string;
+			expect(code).toContain('"p":"hunter2"');
+			expect(code).toContain('"u":"admin"');
+			// user-gesture flag is true so Electron doesn't reject interactive JS
+			expect((view.webContents.executeJavaScript as any).mock.calls[0][1]).toBe(true);
+		});
+
+		it('honors per-service selector overrides', async () => {
+			const window = { contentView: { addChildView: vi.fn(), removeChildView: vi.fn() } } as any;
+			const appView = { webContents: { isDestroyed: () => false, send: vi.fn() } } as any;
+			createServiceView(window, appView, 'proxmox', 'https://proxmox.local:8006', { x: 0, y: 0, width: 800, height: 600 });
+			const view = createdViews[createdViews.length - 1];
+
+			await fillServiceLogin('proxmox', 'root-pw', {
+				username: 'root',
+				usernameSelector: '#user-input',
+				passwordSelector: '#pw-input',
+			});
+			const code = (view.webContents.executeJavaScript as any).mock.calls[0][0] as string;
+			expect(code).toContain('"us":"#user-input"');
+			expect(code).toContain('"ps":"#pw-input"');
+		});
+
+		it('returns failed_eval instead of surfacing the script when executeJavaScript throws', async () => {
+			const window = { contentView: { addChildView: vi.fn(), removeChildView: vi.fn() } } as any;
+			const appView = { webContents: { isDestroyed: () => false, send: vi.fn() } } as any;
+			createServiceView(window, appView, 'broken', 'https://x.local', { x: 0, y: 0, width: 800, height: 600 });
+			const view = createdViews[createdViews.length - 1];
+
+			(view.webContents.executeJavaScript as any).mockImplementationOnce(() => Promise.reject(new Error('eval boom')));
+
+			const result = await fillServiceLogin('broken', 'topsecret');
+			expect(result).toEqual({ filled: false, reason: 'failed_eval' });
+			// The error propagated through fillServiceLogin shouldn't have
+			// leaked the plaintext back through the promise chain.
+		});
+
+		it('forwards a filled:false no_password_field result from the injected script', async () => {
+			const window = { contentView: { addChildView: vi.fn(), removeChildView: vi.fn() } } as any;
+			const appView = { webContents: { isDestroyed: () => false, send: vi.fn() } } as any;
+			createServiceView(window, appView, 'noform', 'https://x.local', { x: 0, y: 0, width: 800, height: 600 });
+			const view = createdViews[createdViews.length - 1];
+
+			(view.webContents.executeJavaScript as any).mockImplementationOnce(() =>
+				Promise.resolve({ filled: false, reason: 'no_password_field' }),
+			);
+
+			const result = await fillServiceLogin('noform', 'top');
+			expect(result).toEqual({ filled: false, reason: 'no_password_field' });
 		});
 	});
 });

@@ -45,12 +45,16 @@ function requireApi() {
  * Save a plaintext credential attached to a service. The renderer hands
  * the plaintext straight to the preload; the main process encrypts with
  * `safeStorage` before anything ever touches disk or the REST layer.
+ *
+ * Username is stored as metadata alongside the encrypted secret —
+ * needed so the autofill flow can type both fields, and so the
+ * credential has a stable "user" identity across reads.
  */
 export async function saveCredential(
 	serviceId: string,
 	credentialType: CredentialType,
 	value: string,
-	reason = 'user saved credential from service editor',
+	options: { username?: string | null; reason?: string } = {},
 ): Promise<void> {
 	const api = requireApi();
 	if (!value || value.length === 0) {
@@ -58,9 +62,14 @@ export async function saveCredential(
 	}
 	const secretRef = credentialRefForService(serviceId);
 	await api.saveCredential(
-		{ name: secretRef, type: credentialType, secretRef },
+		{
+			name: secretRef,
+			type: credentialType,
+			secretRef,
+			username: options.username ?? null,
+		},
 		value,
-		reason,
+		options.reason ?? 'user saved credential from service editor',
 	);
 }
 

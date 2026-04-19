@@ -16,6 +16,7 @@ import {
 	getServiceViewUrl,
 	reloadServiceView,
 	refreshServiceView,
+	fillServiceLogin,
 } from './services';
 import {
 	loadTrustedCerts,
@@ -31,6 +32,7 @@ import {
 	hasCredential,
 	deleteCredential,
 	listCredentials,
+	useCredential,
 	type CredentialMetaInput,
 } from './credentialBroker';
 import { assertServiceId, assertUrl, assertBounds, assertHostname, assertFingerprint } from './validation';
@@ -182,6 +184,43 @@ function registerIpcHandlers(): void {
 		assertAppChrome(event.sender.id);
 		assertServiceId(id);
 		return refreshServiceView(id);
+	});
+
+	/**
+	 * Autofill a service view's login form.
+	 *
+	 * The renderer never sees the plaintext: it asks us by service id,
+	 * we decrypt inside `useCredential`, pass the plaintext directly
+	 * into `fillServiceLogin` (which passes it into `executeJavaScript`
+	 * as a JSON-encoded literal), and return only a {filled, reason}
+	 * result. If the credential doesn't exist we report that up instead
+	 * of throwing — the UI surfaces the "no credential saved" message.
+	 */
+	ipcMain.handle('service:autofill', async (event, id: string, options: {
+		usernameSelector?: string | null;
+		passwordSelector?: string | null;
+		autoSubmit?: boolean;
+	} = {}) => {
+		assertAppChrome(event.sender.id);
+		assertServiceId(id);
+		const secretRef = `service:${id}`;
+		const has = await hasCredential({ baseUrl: SVELTEKIT_URL }, secretRef);
+		if (!has) return { filled: false, reason: 'no_credential' };
+		// useCredential decrypts, passes plaintext into the callback,
+		// then the callback returns without leaking it back out.
+		return useCredential({ baseUrl: SVELTEKIT_URL }, secretRef, async (plaintext) => {
+			// Fetch the stored metadata (username) via listCredentials.
+			// Not ideal to list every time — but the list is small and
+			// avoids a second `?mode=meta` round-trip.
+			const all = await listCredentials({ baseUrl: SVELTEKIT_URL });
+			const meta = all.find((c) => c.secretRef === secretRef);
+			return fillServiceLogin(id, plaintext, {
+				username: meta?.username ?? null,
+				usernameSelector: options.usernameSelector ?? null,
+				passwordSelector: options.passwordSelector ?? null,
+				autoSubmit: options.autoSubmit === true,
+			});
+		});
 	});
 
 	ipcMain.handle('service:hide-all', (event) => {
