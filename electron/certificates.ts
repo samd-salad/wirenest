@@ -195,20 +195,31 @@ export function setupCertVerification(
 ): void {
 	ses.setCertificateVerifyProc((request, callback) => {
 		const { hostname, certificate, verificationResult } = request;
+		const fpPrefix = certificate.fingerprint.slice(0, 24);
 
 		// If the OS or Chromium trusts it, allow
 		if (verificationResult === 'net::OK') {
+			console.log(`[certs] verify ${hostname} (${fpPrefix}...) → OS trusted`);
 			callback(0);
 			return;
 		}
 
 		// Check our trusted fingerprints
 		if (isTrusted(hostname, certificate.fingerprint)) {
+			console.log(`[certs] verify ${hostname} (${fpPrefix}...) → allow (TOFU)`);
 			callback(0);
 			return;
 		}
 
 		// Unknown cert — reject and notify the app chrome
+		const stored = getTrustedCert(hostname);
+		if (stored) {
+			console.warn(
+				`[certs] verify ${hostname} (${fpPrefix}...) → REJECT (fingerprint changed; stored=${stored.fingerprint.slice(0, 24)}...)`,
+			);
+		} else {
+			console.warn(`[certs] verify ${hostname} (${fpPrefix}...) → REJECT (no stored trust)`);
+		}
 		callback(-2);
 
 		// Hide the service view so the cert dialog underneath is visible

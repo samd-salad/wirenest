@@ -224,10 +224,17 @@ export async function reloadServiceView(id: string): Promise<boolean> {
 
 	reset();
 
-	// Clear Electron's cached cert verification for this session.
-	// closeAllConnections() terminates pooled connections, forcing
-	// fresh TLS handshakes that re-trigger setCertificateVerifyProc.
+	// Clear every cache Chromium might use to short-circuit a fresh
+	// TLS handshake. `closeAllConnections()` alone is sometimes not
+	// enough on Electron 41 — Chromium's network service can hold a
+	// per-host cert-verification decision that survives connection
+	// reset. Wiping the HTTP cache and host resolver cache (in
+	// addition to closing live connections) forces the whole stack
+	// to re-verify on the next load, which triggers our verify proc
+	// and lets the newly-trusted fingerprint through.
 	const serviceSession = session.fromPartition(`persist:service-${id}`);
+	try { await serviceSession.clearCache(); } catch { /* non-fatal */ }
+	try { await serviceSession.clearHostResolverCache(); } catch { /* non-fatal */ }
 	await serviceSession.closeAllConnections();
 
 	view.webContents.loadURL(url);
