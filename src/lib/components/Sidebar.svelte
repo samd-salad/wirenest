@@ -354,42 +354,56 @@
 		saveCollapsedCategories(next);
 	}
 
-	// Category drag
-	let catDragFrom = $state<number | null>(null);
-	let catDropTarget = $state<number | null>(null);
+	// Category drag — keyed by id (NOT by rendered index), because empty
+	// categories get filtered out of servicesByCategory and the render
+	// index diverges from the categoryOrder index.
+	let catDragFromId = $state<string | null>(null);
+	let catDropTargetId = $state<string | null>(null);
 	let catDropSide = $state<'before' | 'after' | null>(null);
 
-	function onCatDragStart(e: DragEvent, i: number) {
-		catDragFrom = i;
-		if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', 'cat'); }
+	function onCatDragStart(e: DragEvent, id: string) {
+		catDragFromId = id;
+		if (e.dataTransfer) {
+			e.dataTransfer.effectAllowed = 'move';
+			e.dataTransfer.setData('text/plain', `cat-${id}`);
+		}
 	}
-	function onCatDragOver(e: DragEvent, i: number) {
-		if (catDragFrom === null) return;
+	function onCatDragOver(e: DragEvent, id: string) {
+		if (catDragFromId === null) return;
 		e.preventDefault();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
 		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		catDropTarget = i;
+		catDropTargetId = id;
 		catDropSide = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
 	}
 	function onCatDragLeave(e: DragEvent) {
 		const related = e.relatedTarget as HTMLElement | null;
-		if (!related || !(e.currentTarget as HTMLElement).contains(related)) { catDropTarget = null; catDropSide = null; }
+		if (!related || !(e.currentTarget as HTMLElement).contains(related)) {
+			catDropTargetId = null; catDropSide = null;
+		}
 	}
 	function onCatDrop(e: DragEvent) {
 		e.preventDefault();
-		if (catDragFrom === null || catDropTarget === null) return;
-		let to = catDropTarget;
-		if (catDropSide === 'after') to++;
-		if (catDragFrom < to) to--;
-		if (catDragFrom !== to) {
-			const next = [...categoryOrder];
-			const [moved] = next.splice(catDragFrom, 1);
-			next.splice(to, 0, moved);
-			categoryOrder = next;
-			saveCategoryOrder(next);
-		}
-		catDragFrom = null; catDropTarget = null; catDropSide = null;
+		if (catDragFromId === null || catDropTargetId === null) return;
+		if (catDragFromId === catDropTargetId) return;
+
+		// Work in the full categoryOrder space, not the rendered list.
+		const next = [...categoryOrder];
+		const fromIdx = next.indexOf(catDragFromId);
+		if (fromIdx === -1) return;
+		next.splice(fromIdx, 1);
+
+		let toIdx = next.indexOf(catDropTargetId);
+		if (toIdx === -1) return;
+		if (catDropSide === 'after') toIdx++;
+
+		next.splice(toIdx, 0, catDragFromId);
+		categoryOrder = next;
+		saveCategoryOrder(next);
+
+		catDragFromId = null; catDropTargetId = null; catDropSide = null;
 	}
-	function onCatDragEnd() { catDragFrom = null; catDropTarget = null; catDropSide = null; }
+	function onCatDragEnd() { catDragFromId = null; catDropTargetId = null; catDropSide = null; }
 
 	// Tools collapsed state
 	let toolsCollapsed = $state(loadToolsCollapsed());
@@ -672,17 +686,17 @@
 	<!-- Services (external tool tabs) -->
 	<div class="category-label">Services</div>
 	{#if $services.length > 0}
-			{#each servicesByCategory as category, catIdx (category.id)}
+			{#each servicesByCategory as category (category.id)}
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div
 					class="category-header"
-					class:dragging={catDragFrom === catIdx}
-					class:drop-before={catDropTarget === catIdx && catDropSide === 'before'}
-					class:drop-after={catDropTarget === catIdx && catDropSide === 'after'}
+					class:dragging={catDragFromId === category.id}
+					class:drop-before={catDropTargetId === category.id && catDropSide === 'before'}
+					class:drop-after={catDropTargetId === category.id && catDropSide === 'after'}
 					draggable="true"
 					onclick={() => toggleCategory(category.id)}
-					ondragstart={(e) => onCatDragStart(e, catIdx)}
-					ondragover={(e) => onCatDragOver(e, catIdx)}
+					ondragstart={(e) => onCatDragStart(e, category.id)}
+					ondragover={(e) => onCatDragOver(e, category.id)}
 					ondragleave={(e) => onCatDragLeave(e)}
 					ondrop={(e) => onCatDrop(e)}
 					ondragend={onCatDragEnd}
@@ -1042,14 +1056,17 @@
 	.sidebar-divider { height: 1px; background: var(--color-border); margin: 0.5rem 0; }
 	.empty-hint { font-size: 0.8rem; color: var(--color-text-muted); padding: 0.75rem 0.5rem; text-align: center; opacity: 0.6; line-height: 1.5; }
 
-	.add-panel, .edit-panel { background: var(--color-bg-elevated); border: 1px solid var(--color-border); border-radius: 6px; margin: 0.25rem 0; overflow-y: auto; max-height: 75vh; }
+	/* No max-height / inner overflow — the sidebar's own scroll handles
+	   this. Nested scroll regions inside the already-scrolling sidebar
+	   made the edit / add forms feel tiny when Wiki was expanded. */
+	.add-panel, .edit-panel { background: var(--color-bg-elevated); border: 1px solid var(--color-border); border-radius: 6px; margin: 0.25rem 0; }
 	.edit-panel { padding: 0.5rem; display: flex; flex-direction: column; gap: 0.4rem; }
 	.add-tabs { display: flex; border-bottom: 1px solid var(--color-border); }
 	.add-tabs button { flex: 1; padding: 0.4rem; background: none; border: none; color: var(--color-text-muted); cursor: pointer; font-size: 0.75rem; font-weight: 600; }
 	.add-tabs button:hover { color: var(--color-text); }
 	.add-tabs button.active { color: var(--color-accent); border-bottom: 2px solid var(--color-accent); }
 
-	.catalog-list { max-height: 55vh; overflow-y: auto; }
+	.catalog-list { /* grows with its content; sidebar scroll handles overflow */ }
 	.catalog-item { display: flex; align-items: center; gap: 0.5rem; width: 100%; padding: 0.4rem 0.5rem; background: none; border: none; color: var(--color-text); cursor: pointer; font-size: 0.8rem; text-align: left; }
 	.catalog-item:hover { background: var(--color-bg); }
 	.catalog-icon { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }

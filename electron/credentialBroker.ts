@@ -198,8 +198,13 @@ export async function useCredential<T>(
 	try {
 		return await fn(plaintext);
 	} catch (err) {
-		// Never bubble the callback's message — it can quote the plaintext.
-		console.error('[credentialBroker] useCredential callback threw:', err);
+		// Never bubble the callback's message or stack — either can quote
+		// the plaintext (e.g. an HTTP client that echoes "401 Bearer
+		// <token> rejected"). Log only the error class name so stderr /
+		// crash dumps can't capture the secret. The rethrown error is
+		// the generic label.
+		const name = (err as Error | undefined)?.name ?? 'unknown';
+		console.error('[credentialBroker] useCredential callback threw (type=%s)', name);
 		throw new Error('credential operation failed');
 	}
 }

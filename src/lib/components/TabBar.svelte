@@ -309,10 +309,15 @@
 
 	.tabs-scroll {
 		display: flex;
-		flex-wrap: wrap;
+		flex-wrap: nowrap;
 		flex: 1;
 		min-width: 0;
+		overflow-x: auto;
+		scrollbar-width: thin;
 	}
+	.tabs-scroll::-webkit-scrollbar { height: 3px; }
+	.tabs-scroll::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
+	.tabs-scroll::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
 
 	.tab {
 		display: flex;
